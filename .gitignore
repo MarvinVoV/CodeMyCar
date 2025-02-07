@@ -12,6 +12,7 @@
 /Debug/
 /Release/
 /CMakeFiles/
+**/CMakeCache.txt
 *.o
 *.d
 *.elf
@@ -49,10 +50,14 @@ flasher_args.json
 **/Middlewares/**/Documentation/
 **/Middlewares/**/Examples/
 **/Middlewares/**/Projects/
+**/Middlewares/Third_Party/
 **/Drivers/**/Documentation/
 **/Drivers/**/Examples/
 **/Drivers/**/Projects/
-*.ioc
+**/Drivers/CMSIS/**/*.c
+**/Drivers/CMSIS/**/*.h
+**/Drivers/STM32**/*.c
+**/Drivers/STM32**/*.h
 .mxproject
 *.mx
 

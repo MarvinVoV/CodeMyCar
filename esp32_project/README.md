@@ -148,3 +148,9 @@ idf.py -p /dev/cu/xxxx flash monitor
    b. cmd+shift+p，输入 esp-idf，选择 esp-idf: Select OpenCDO Board Configuration，选择 esp32c6，然后点击 ok
    c. cmd+shift+p，输入 esp-idf，选择 esp-idf: Select Flash Method, 选择 UART
    d. cmd+shift+p，输入 esp-idf，选择 esp-idf: Add vscode Configuration Folder.  重要：会创建.vscode 目录以及 c_cpp_properties.json 文件，使得 vscode 可以识别代码库，智能提示、代码补全等。
+
+## MQTT
+开启mqtt服务
+```shell
+/opt/homebrew/opt/mosquitto/sbin/mosquitto -c /opt/homebrew/etc/mosquitto/mosquitto.conf
+```
