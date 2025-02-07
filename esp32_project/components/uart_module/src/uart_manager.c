@@ -46,7 +46,6 @@ void uart_init() {
                                      .parity = UART_PARITY_DISABLE,
                                      .stop_bits = UART_STOP_BITS_1,
                                      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
-
   // 安装UART驱动，启用DMA和IRAM中断
   esp_err_t err =
       uart_driver_install(UART_PORT,              // UART端口号

@@ -40,6 +40,7 @@ def parse_binary_frame(binary_data):
             PROTOCOL_HEADER_FORMAT, binary_data[:PROTOCOL_HEADER_SIZE]
         )
 
+
         # 检查帧头是否正确
         if header != 0xAA:
             return f"Invalid frame: Header mismatch (expected 0xAA, got {header:02X})"
@@ -54,7 +55,7 @@ def parse_binary_frame(binary_data):
         # 将数据转换为十六进制字符串
         data_hex = " ".join(f"{byte:02X}" for byte in data)
         # 尝试解析为字符串
-        decoded_message = "";
+        decoded_message = ""
         try:
             decoded_message = data.decode("utf-8")
             print(f"Received string message: {decoded_message}")
@@ -79,7 +80,8 @@ def on_message(client, userdata, msg, properties=None):
     #     print(f"Received string message: {decoded_message}")
     # except UnicodeDecodeError:
     #     print("Received message is not a valid UTF-8 string")
-
+    print("Raw binary data:", " ".join(f"{byte:02X}" for byte in msg.payload))
+    
     # 尝试解析二进制数据
     parsed_result = parse_binary_frame(msg.payload)
     print(parsed_result)
@@ -94,7 +96,7 @@ def send_command(client):
         if command.lower() == "exit":
             break
         # NOTE 对于指令内容 约定字符串格式
-        command_with_null = command + '\0'
+        command_with_null = command + "\0"
         client.publish(TOPIC_PUB, command_with_null)
         print(f"命令 '{command}' 已发送到主题 '{TOPIC_PUB}'")
 

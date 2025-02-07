@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include "cmsis_os.h"
+#include "log_task.h"
 #include "queue_manager.h"
 #include "stm32h7xx_hal.h"
 
@@ -20,6 +21,8 @@ void log_manager_init(void) {
   configASSERT(log_queue != NULL);  // 确保队列创建成功
 
   QueueManager_RegisterHandler(QUEUE_TYPE_LOG, log_queue);
+
+  log_task_init();
 }
 
 void log_record(log_level_t level, log_module_t module, const char* file,

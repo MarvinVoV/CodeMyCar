@@ -149,6 +149,8 @@ int main(void)
 
   log_manager_init();
 
+  LOG_INFO(LOG_LEVEL_INFO ,"hello log");
+
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -160,17 +162,17 @@ int main(void)
 
 
   // 初始化舵机
-  Servo_HWConfig hw = {
-      .pwm_tim = &htim2,
-      .channel = TIM_CHANNEL_1,
-      .min_pulse = 500,
-      .max_pulse = 2500,
-      .min_angle = 0,
-      .max_angle = 180
-  };
-  my_servo.hw = hw;
+  // Servo_HWConfig hw = {
+  //     .pwm_tim = &htim2,
+  //     .channel = TIM_CHANNEL_1,
+  //     .min_pulse = 500,
+  //     .max_pulse = 2500,
+  //     .min_angle = 0,
+  //     .max_angle = 180
+  // };
+  // my_servo.hw = hw;
 
-  Servo_Init(&my_servo);
+  // Servo_Init(&my_servo);
 
 
   /* USER CODE END RTOS_THREADS */
@@ -188,9 +190,9 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1) {
 
-		/* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
-		/* USER CODE BEGIN 3 */
+    /* USER CODE BEGIN 3 */
 	}
   /* USER CODE END 3 */
 }

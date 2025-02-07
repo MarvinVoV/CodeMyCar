@@ -29,7 +29,7 @@ void log_task(void* argument) {
   }
   // check log queue
   while (1) {
-    osStatus_t status = osMessageQueueGet(&mq_id, &entry, NULL, osWaitForever);
+    osStatus_t status = osMessageQueueGet(mq_id, &entry, NULL, osWaitForever);
     if (status == osOK) {
       Send_Log(&entry);
     } else {
