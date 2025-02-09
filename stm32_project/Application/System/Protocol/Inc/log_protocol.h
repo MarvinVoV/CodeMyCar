@@ -34,17 +34,10 @@ typedef enum {
 
 #pragma pack(push, 1)
 typedef struct {
-  uint32_t timestamp;     // 时间戳（单位ms）
-  uint16_t module;        // 模块标识（log_module_t）
-  uint8_t level;          // 日志级别（log_level_t）
-  uint8_t code_location;  // 代码位置标识（0-无，1-带文件名行号）
-  union {
-    struct {
-      uint16_t line;  // 代码行号
-      char file[12];  // 文件名（截断至12字节）
-    } location;
-    char message[128];  // 日志正文（无代码位置时）
-  } content;
+  uint32_t timestamp;  // 时间戳（单位ms）
+  uint16_t module;     // 模块标识（log_module_t）
+  uint8_t level;       // 日志级别（log_level_t）
+  char message[128];   // 日志正文
 } log_entry_t;
 #pragma pack(pop)
 

@@ -1,12 +1,28 @@
 import paho.mqtt.client as mqtt
 import struct
 from datetime import datetime
+from protocol_parser import ProtocolParser
 
 # Broker 配置
 BROKER_IP = "127.0.0.1"  # MQTT Broker 的 IP 地址，请确保这是正确的IP
 BROKER_PORT = 1883  # MQTT Broker 的端口
 TOPIC_SUB = "device/sensor"  # 订阅来自 ESP32 的消息的主题
 TOPIC_PUB = "server/ctrl"  # 向 ESP32 发送命令的主题
+
+
+def crc16_ccitt(data, length):
+    """CRC16-CCITT 校验算法"""
+    crc = 0xFFFF
+    for i in range(length):
+        crc ^= data[i] << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc <<= 1
+            crc &= 0xFFFF
+    return crc
+
 
 # 定义协议帧结构
 PROTOCOL_HEADER_FORMAT = "<BBH"  # Header (1 Byte), Type (1 Byte), Length (2 Byte)
@@ -40,7 +56,6 @@ def parse_binary_frame(binary_data):
             PROTOCOL_HEADER_FORMAT, binary_data[:PROTOCOL_HEADER_SIZE]
         )
 
-
         # 检查帧头是否正确
         if header != 0xAA:
             return f"Invalid frame: Header mismatch (expected 0xAA, got {header:02X})"
@@ -72,19 +87,31 @@ def on_message(client, userdata, msg, properties=None):
     """
     处理接收到的消息
     """
-    print(f"Received from ESP32 [{msg.topic}]:")
+    print(f"Received from ESP32 [{msg.topic}],msg binary length {len(msg.payload)}")
 
     # 先尝试解析为字符串
-    # try:
-    #     decoded_message = msg.payload.decode("utf-8")
-    #     print(f"Received string message: {decoded_message}")
-    # except UnicodeDecodeError:
-    #     print("Received message is not a valid UTF-8 string")
-    print("Raw binary data:", " ".join(f"{byte:02X}" for byte in msg.payload))
-    
+    try:
+        decoded_message = msg.payload.decode("utf-8")
+        print(f"Received string message: {decoded_message}")
+    except UnicodeDecodeError:
+        print("Received message is not a valid UTF-8 string")
+    # print("Raw binary data:", " ".join(f"{byte:02X}" for byte in msg.payload))
+
     # 尝试解析二进制数据
-    parsed_result = parse_binary_frame(msg.payload)
-    print(parsed_result)
+    print("Parsing binary data...")
+    parser = ProtocolParser()
+
+    # 循环逐字节解析二进制数据
+    for byte in msg.payload:
+        result = parser.parse_byte(byte)
+        if result:
+            print("解析完成")
+            parser.print_hex()
+            parser.print_log_data()
+
+            break
+    else:
+        print("数据解析未完成，继续接收数据")
 
 
 def send_command(client):

@@ -1,15 +1,18 @@
-#include <stdbool.h>
+#include "uart_protocol.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <uart_protocol.h>
 
-static uint16_t crc16_ccitt_continue(uint16_t crc, const uint8_t* data,
-                                     uint16_t length);
+#include "esp_log.h"
+
+static const char* TAG = "Protocol";
+
 // 封装协议数据帧
 uint8_t* protocol_pack_frame(protocol_type_t type, const uint8_t* data,
                              uint16_t data_len, uint16_t* frame_len) {
   if (data_len > PROTOCOL_MAX_DATA_LEN) {
+    ESP_LOGE("pack", "data length too long");
     return NULL;
   }
 
@@ -18,6 +21,7 @@ uint8_t* protocol_pack_frame(protocol_type_t type, const uint8_t* data,
                sizeof(uint16_t);
   uint8_t* frame = (uint8_t*)malloc(*frame_len);
   if (!frame) {
+    ESP_LOGE(TAG, "pack: malloc failed");
     return NULL;
   }
 
@@ -98,25 +102,10 @@ int protocol_parse_byte(protocol_parser_t* parser, uint8_t byte) {
       break;
     case STATE_WAIT_TAIL_2:
       if (byte == (FRAME_TAIL >> 8)) {
-        // 构造协议头和数据部分的字节流
-        uint8_t header_part[5];
-        header_part[0] =
-            (uint8_t)(parser->frame.header & 0xFF);  // Header低字节
-        header_part[1] =
-            (uint8_t)((parser->frame.header >> 8) & 0xFF);     // Header高字节
-        header_part[2] = parser->frame.type;                   // 类型
-        header_part[3] = (uint8_t)(parser->frame.len & 0xFF);  // 长度低字节
-        header_part[4] =
-            (uint8_t)((parser->frame.len >> 8) & 0xFF);  // 长度高字节
-
-        // 计算CRC：协议头 + 数据
-        uint16_t crc = crc16_ccitt(header_part, sizeof(header_part));
-        if (parser->frame.len > 0) {
-          crc =
-              crc16_ccitt_continue(crc, parser->frame.data, parser->frame.len);
-        }
-
-        if (parser->frame.crc == crc) {
+        uint16_t calc_crc =
+            crc16_ccitt((uint8_t*)&parser->frame,
+                        sizeof(protocol_header_t) + parser->frame.len);
+        if (parser->frame.crc == calc_crc) {
           return 1;  // 解析成功
         }
       }
@@ -132,21 +121,6 @@ int protocol_parse_byte(protocol_parser_t* parser, uint8_t byte) {
  */
 uint16_t crc16_ccitt(const uint8_t* data, uint16_t length) {
   uint16_t crc = 0xFFFF;
-  for (uint16_t i = 0; i < length; i++) {
-    crc ^= (uint16_t)data[i] << 8;
-    for (uint8_t j = 0; j < 8; j++) {
-      if (crc & 0x8000) {
-        crc = (crc << 1) ^ 0x1021;
-      } else {
-        crc <<= 1;
-      }
-    }
-  }
-  return crc;
-}
-
-static uint16_t crc16_ccitt_continue(uint16_t crc, const uint8_t* data,
-                                     uint16_t length) {
   for (uint16_t i = 0; i < length; i++) {
     crc ^= (uint16_t)data[i] << 8;
     for (uint8_t j = 0; j < 8; j++) {

@@ -9,6 +9,7 @@
 #define INC_UART_HANDLE_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "log_protocol.h"
 #include "stm32h7xx_hal.h"

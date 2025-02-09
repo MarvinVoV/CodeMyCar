@@ -21,14 +21,14 @@
 #endif
 
 // 核心日志记录函数（带格式化支持）
-void log_record(log_level_t level, log_module_t module, const char* file,
-                uint16_t line, const char* format, ...);
+void log_record(log_level_t level, log_module_t module, const char* format,
+                ...);
 
 // 带代码位置的日志宏
 #define LOG(level, module, ...)                                       \
   do {                                                                \
     if ((level & LOG_LEVEL_FILTER) && (module & LOG_MODULE_FILTER)) { \
-      log_record(level, module, __FILE__, __LINE__, __VA_ARGS__);     \
+      log_record(level, module, __VA_ARGS__);                         \
     }                                                                 \
   } while (0)
 

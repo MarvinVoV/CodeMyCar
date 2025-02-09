@@ -1,14 +1,6 @@
-/*
- * uart_protocol.h
- *
- *  Created on: Feb 4, 2025
- *      Author: marvin
- */
-
-#ifndef SYSTEM_PROTOCOL_INC_UART_PROTOCOL_H_
-#define SYSTEM_PROTOCOL_INC_UART_PROTOCOL_H_
-
+#pragma once
 #include <stdint.h>
+
 
 #define FRAME_HEADER 0xAA55
 #define FRAME_HEADER_HIGH 0xAA
@@ -98,5 +90,3 @@ uint8_t* protocol_pack_frame(protocol_type_t type, const uint8_t* data,
  * @param length  数据长度
  */
 uint16_t crc16_ccitt(const uint8_t* data, uint16_t length);
-
-#endif /* SYSTEM_PROTOCOL_INC_UART_PROTOCOL_H_ */

@@ -5,8 +5,8 @@ from time import sleep
 import struct
 
 # 协议常量定义
-HEADER = 0xAA
-FRAME_END = 0x55
+HEADER = 0xAA55
+FRAME_END = 0x55AA
 MAX_DATA_LEN = 512
 
 
@@ -17,12 +17,18 @@ class ProtocolType:
     LOG = 0x03
 
 
-def calculate_checksum(data):
-    """计算异或校验和"""
-    checksum = 0
+def crc16_ccitt(data):
+    """CRC16-CCITT (0xFFFF) 校验实现"""
+    crc = 0xFFFF
     for byte in data:
-        checksum ^= byte
-    return checksum
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc <<= 1
+            crc &= 0xFFFF  # 保持16位
+    return crc
 
 
 def build_frame(protocol_type, data):
@@ -31,17 +37,21 @@ def build_frame(protocol_type, data):
         raise ValueError(f"Data length exceeds maximum limit ({MAX_DATA_LEN})")
 
     # 构建基础帧
-    frame = bytes([HEADER, protocol_type]) + struct.pack("<H", len(data))
+    frame = (
+        struct.pack("<H", HEADER)
+        + struct.pack("B", protocol_type)
+        + struct.pack("<H", len(data))
+    )
 
     # 添加数据
     frame += bytes(data)
 
     # 计算校验和
-    checksum = calculate_checksum(frame)
-    frame += bytes([checksum])
+    checksum = crc16_ccitt(frame)
+    frame += struct.pack("<H", checksum)
 
     # 添加帧尾
-    frame += bytes([FRAME_END])
+    frame += struct.pack("<H", FRAME_END)
 
     return frame
 
@@ -52,6 +62,7 @@ def send_test_frame(port, baudrate, protocol_type, data):
         with serial.Serial(port, baudrate, timeout=10) as ser:
             frame = build_frame(protocol_type, data)
             print(f"Sending frame: {frame.hex(' ').upper()}")
+            print(f"Frame length: {len(frame)} bytes")
             if ser.is_open:
                 print("Serial port is open")
             else:
@@ -61,6 +72,51 @@ def send_test_frame(port, baudrate, protocol_type, data):
                 print("Error: Failed to write data to serial port")
                 sys.exit(1)
             sleep(0.1)  # 等待数据发送完成
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        sys.exit(1)
+
+
+def send_test_frame_split(port, baudrate, protocol_type, data):
+    """拆分数据包并分两次发送，每次间隔 100ms"""
+    try:
+        with serial.Serial(port, baudrate, timeout=10) as ser:
+            frame = build_frame(protocol_type, data)
+            print(f"Original frame: {frame.hex(' ').upper()}")
+            print(f"Frame length: {len(frame)} bytes")
+
+            # 计算拆分点
+            split_index = len(frame) // 2  # 将数据包分成两半
+
+            # 拆分数据包为两部分
+            part1 = frame[:split_index]
+            part2 = frame[split_index:]
+
+            # 打印拆分后的数据
+            print(f"Part 1: {part1.hex(' ').upper()}")
+            print(f"Part 2: {part2.hex(' ').upper()}")
+
+            # 确保串口已打开
+            if ser.is_open:
+                print("Serial port is open")
+            else:
+                print("Serial port is not open")
+
+            # 发送第一部分数据
+            if ser.write(part1) != len(part1):
+                print("Error: Failed to write part 1 to serial port")
+                sys.exit(1)
+
+            # 等待 100ms
+            sleep(0.1)
+
+            # 发送第二部分数据
+            if ser.write(part2) != len(part2):
+                print("Error: Failed to write part 2 to serial port")
+                sys.exit(1)
+
+            print("Frame sent in two parts successfully")
+
     except Exception as e:
         print(f"Error: {str(e)}")
         sys.exit(1)
@@ -76,24 +132,30 @@ def main():
         "-t",
         "--type",
         type=int,
-        required=True,
+        required=False,
         choices=[ProtocolType.SENSOR, ProtocolType.CONTROL, ProtocolType.LOG],
         help="Command type (1:SENSOR, 2:CONTROL, 3:LOG)",
+        default=ProtocolType.CONTROL,
     )
     parser.add_argument(
-        "-d", "--data", default="", help="Hex data string (e.g. 'A1B2C3')"
+        "-d", "--data", default="", help="String data to send (e.g. 'Hello, World!')"
     )
 
     args = parser.parse_args()
 
     # 转换数据格式
     try:
-        data = bytes.fromhex(args.data) if args.data else bytes()
+        data = args.data.encode("utf-8")  # 将字符串编码为字节数据
     except ValueError:
-        print("Invalid hex data format")
+        print(f"Invalid string data: {str(e)}")
         sys.exit(1)
 
-    send_test_frame(args.port, args.baud, args.type, data)
+    print(f"Original string: {data.decode('utf-8')}")
+    # 打印输入数据的十六进制表示
+    print(f"Input data in hex: {data.hex(' ').upper()}")
+
+    # send_test_frame(args.port, args.baud, args.type, data)
+    send_test_frame_split(args.port, args.baud, args.type, data)
 
 
 if __name__ == "__main__":

@@ -9,9 +9,10 @@
 #include "esp_log.h"
 #include "freertos/ringbuf.h"
 #include "freertos/task.h"
-#include "protocol.h"
 #include "queue_manager.h"
 #include "task_priorities.h"
+#include "uart_protocol.h"
+#include "mqtt_manager.h"
 
 static const char* TAG = "UARTManager";
 // 波特率
@@ -36,6 +37,7 @@ static void handle_uart_event_task(void* pvParameters);
 static void handle_ring_buffer_task(void* pvParameters);
 static void handle_mqtt_message_task(void* pvParameters);
 
+size_t buffer_to_hex(const uint8_t* src_buffer, size_t src_len, char* dst_buffer, size_t dst_size) ;
 /**
  * @brief 初始化UART模块
  * @param config UART配置参数
@@ -118,31 +120,121 @@ void uart_init() {
 static void handle_uart_event_task(void* pvParameters) {
   uart_event_t event;
   // NOTE: 内存分配在静态存储区,并且程序启动时元素就会被初始化为0
-  static uint8_t dtmp[RING_BUFFER_SIZE];
+  static uint8_t accumulated_buf[RING_BUFFER_SIZE * 2];
+  static size_t accumulated_len = 0;
   while (1) {
     // 等待UART事件
     if (xQueueReceive(uart_event_queue, (void*)&event,
                       (TickType_t)portMAX_DELAY)) {
-      // 清空缓冲区，避免残留数据
-      bzero(dtmp, RING_BUFFER_SIZE);
       switch (event.type) {
         case UART_DATA:
           ESP_LOGD(TAG, "[UART DATA]: %d", event.size);
-          // 限制读取长度不超过缓冲区大小
+
+          // 读取新数据到临时缓冲区
+          uint8_t temp_buf[RING_BUFFER_SIZE];
           size_t read_size =
-              (event.size > RING_BUFFER_SIZE) ? RING_BUFFER_SIZE : event.size;
-          int len = uart_read_bytes(UART_PORT, dtmp, read_size, portMAX_DELAY);
-          // 将接收到的数据放入环形缓冲区
-          BaseType_t xStatus =
-              xRingbufferSend(rb_handle, dtmp, len, portMAX_DELAY);
-          if (xStatus != pdPASS) {
-            ESP_LOGE(TAG, "Failed to send data to ring buffer");
+              (event.size > sizeof(temp_buf)) ? sizeof(temp_buf) : event.size;
+          int len =
+              uart_read_bytes(UART_PORT, temp_buf, read_size, portMAX_DELAY);
+
+          // 检查缓冲区剩余空间
+          if (accumulated_len + len > sizeof(accumulated_buf)) {
+            ESP_LOGE(TAG, "Accumulated buffer overflow, resetting");
+            accumulated_len = 0;
           }
-          // 若实际数据长度超过缓冲区，丢弃剩余数据
-          if (event.size > RING_BUFFER_SIZE) {
+
+          // 将新数据追加到累积缓冲区
+          memcpy(accumulated_buf + accumulated_len, temp_buf, len);
+          accumulated_len += len;
+
+          // 协议解析状态机
+          size_t processed = 0;
+          while (accumulated_len - processed >= PROTOCOL_HEADER_SIZE) {
+            protocol_header_t* header =
+                (protocol_header_t*)(accumulated_buf + processed);
+            // 检查帧头有效性
+            if (accumulated_buf[processed] != FRAME_HEADER_LOW ||
+                accumulated_buf[processed + 1] != FRAME_HEADER_HIGH) {
+              //   ESP_LOGW(TAG, "Invalid frame header 0x%04X", header->header);
+              //   processed++
+
+              // 优化：优化帧头搜索逻辑 #define FRAME_HEADER 0xAA55
+              size_t next_header = accumulated_len;  // 初始化为末尾，表示未找到
+              for (size_t i = processed; i <= accumulated_len - 2; i++) {
+                if (accumulated_buf[i] == FRAME_HEADER_LOW &&
+                    accumulated_buf[i + 1] == FRAME_HEADER_HIGH) {
+                  next_header = i;
+                  break;
+                }
+              }
+              if (next_header == accumulated_len) {
+                processed = accumulated_len;  // 未找到，清空缓冲区
+              } else {
+                processed = next_header;
+              }
+              continue;
+            }
+
+            // 计算完整帧长度 (头 + 数据 + CRC + 尾)
+            // NOTE 计算FRAME_TAIL长度不能使用 sizeof(FRAME_TAIL)
+            // FRAME_TAIL是宏定义的整型常量，sizeof(FRAME_TAIL)在32位系统中返回4字节
+            uint16_t total_len = PROTOCOL_HEADER_SIZE + header->len +
+                                 sizeof(uint16_t) + sizeof(uint16_t);
+            // 检查是否收到完整帧
+            if (accumulated_len - processed < total_len) {
+              break;  // 数据不完整，等待下次接收
+            }
+            // 校验数据长度合法性
+            // if (header->len > PROTOCOL_MAX_DATA_LEN) {
+            // }
+
+            // 检查帧尾有效性
+            uint16_t* tail_ptr = (uint16_t*)(accumulated_buf + processed +
+                                             total_len - sizeof(uint16_t));
+            if (*tail_ptr != FRAME_TAIL) {
+              ESP_LOGW(TAG, "Invalid frame tail 0x%04X", *tail_ptr);
+              // processed += total_len;
+              processed++;  // 仅跳过帧头第一个字节，重新同步，防止因错误的total_len导致越界
+              continue;
+            }
+            // 计算CRC
+            uint16_t received_crc =
+                *((uint16_t*)(accumulated_buf + processed +
+                              PROTOCOL_HEADER_SIZE + header->len));
+            uint16_t calculated_crc =
+                crc16_ccitt(accumulated_buf + processed,
+                            PROTOCOL_HEADER_SIZE + header->len);
+            if (received_crc != calculated_crc) {
+              ESP_LOGW(TAG, "CRC mismatch: received 0x%04X, calculated 0x%04X",
+                       received_crc, calculated_crc);
+              processed += total_len;
+              continue;
+            }
+
+            // 将完整数据包存入环形缓冲区
+            BaseType_t xStatus =
+                xRingbufferSend(rb_handle, accumulated_buf + processed,
+                                total_len, portMAX_DELAY);
+            if (xStatus != pdPASS) {
+              ESP_LOGE(TAG, "Failed to send data to ring buffer");
+            }
+
+            processed += total_len;
+            ESP_LOGI(TAG, "Processed complete frame: %d bytes", total_len);
+          }
+
+          // 移动剩余未处理数据到缓冲区头部
+          if (processed > 0) {
+            size_t remaining = accumulated_len - processed;
+            memmove(accumulated_buf, accumulated_buf + processed, remaining);
+            accumulated_len = remaining;
+          }
+
+          // 处理溢出情况
+          if (event.size > read_size) {
             uart_flush_input(UART_PORT);
             ESP_LOGE(TAG, "Data overflow, flushed %d bytes",
-                     event.size - RING_BUFFER_SIZE);
+                     event.size - read_size);
           }
           break;
         case UART_FIFO_OVF:
@@ -285,17 +377,22 @@ static void handle_mqtt_message_task(void* pvParameters) {
     // TODO 暂时只有指令控制类型
     // 构造数据帧
     uint8_t* frame = NULL;
-    uint8_t frame_len;
-    frame = pack(PROTOCOL_TYPE_CONTROL, mqtt_send_data.data, mqtt_send_data.len,
-                 &frame_len);
+    uint16_t frame_len;
+    frame = protocol_pack_frame(PROTOCOL_TYPE_CONTROL, mqtt_send_data.data,
+                                mqtt_send_data.len, &frame_len);
     // 1. 以hex方式打印data 2. 打印len 3. 以hex方式打印frame
-    ESP_LOGI(TAG, "Ready send data len=%d", mqtt_send_data.len);
-    ESP_LOG_BUFFER_HEXDUMP(TAG, mqtt_send_data.data, mqtt_send_data.len,
-                           ESP_LOG_INFO);
+    ESP_LOGI(TAG, "Ready send data len=%u", mqtt_send_data.len);
+    // ESP_LOG_BUFFER_HEXDUMP(TAG, mqtt_send_data.data, mqtt_send_data.len,
+    //                        ESP_LOG_INFO);
     if (!frame) {
       ESP_LOGE(TAG, "Failed to pack MQTT message");
     } else {
       ESP_LOG_BUFFER_HEXDUMP(TAG, frame, frame_len, ESP_LOG_INFO);
+      // log temp TODO
+      char hex_data[100] = {0};
+      buffer_to_hex(frame, frame_len, hex_data, sizeof(hex_data));
+      mqtt_publish("device/sensor", hex_data, strlen(hex_data),0);
+
 
       // 通过UART发送数据
       if (!uart_send_data(frame, frame_len)) {
@@ -326,4 +423,42 @@ bool uart_send_data(const uint8_t* data, size_t len) {
     return false;
   }
   return bytes_written == len;
+}
+
+
+
+/**
+ * @brief 将缓冲区内容以十六进制格式打印到目标缓冲区
+ * 
+ * @param src_buffer 源缓冲区
+ * @param src_len 源缓冲区长度
+ * @param dst_buffer 目标缓冲区
+ * @param dst_size 目标缓冲区大小
+ * @return size_t 返回写入目标缓冲区的字符数（不包括终止符'\0'）
+ */
+size_t buffer_to_hex(const uint8_t* src_buffer, size_t src_len, char* dst_buffer, size_t dst_size) {
+  if (src_buffer == NULL || dst_buffer == NULL || dst_size == 0) {
+      return 0; // 参数无效
+  }
+
+  size_t written = 0; // 已写入目标缓冲区的字符数
+  for (size_t i = 0; i < src_len; i++) {
+      // 格式化为两位十六进制数，并添加空格
+      int bytes_needed = snprintf(dst_buffer + written, dst_size - written, "%02X ", src_buffer[i]);
+      if (bytes_needed < 0 || written + bytes_needed >= dst_size) {
+          // 如果目标缓冲区空间不足，截断并返回已写入的字符数
+          break;
+      }
+      written += bytes_needed;
+  }
+
+  // 移除最后一个多余的空格（如果有的话）
+  if (written > 0 && dst_buffer[written - 1] == ' ') {
+      dst_buffer[written - 1] = '\0';
+      written--;
+  } else {
+      dst_buffer[written] = '\0'; // 确保字符串以'\0'结尾
+  }
+
+  return written;
 }
