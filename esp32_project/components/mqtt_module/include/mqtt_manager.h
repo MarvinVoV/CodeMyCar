@@ -1,30 +1,29 @@
 #pragma once
-#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_event.h"
-#include "freertos/event_groups.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // MQTT消息结构
-typedef struct {
-  char *topic;       // topic name
-  uint8_t *payload;  // message data
-  size_t length;     // message data length
+typedef struct
+{
+    char* topic; // topic name
+    uint8_t* payload; // message data
+    size_t length; // message data length
 } mqtt_msg_t;
 
 // MQTT配置参数
-typedef struct {
-  const char *broker_url;  // MQTT broker URL
-  const char *client_id;   // MQTT client ID
+typedef struct
+{
+    const char* broker_url; // MQTT broker URL
+    const char* client_id; // MQTT client ID
 } mqtt_config_t;
 
 /**
  * @brief Initialize the MQTT client
- * @param config MQTT configuration parameters
  */
 void mqtt_init();
 
@@ -49,7 +48,7 @@ void mqtt_init_and_start(void);
  * @param len Message length
  * @param qos Quality of Service level
  */
-esp_err_t mqtt_publish(const char *topic, const char *data, const size_t len,
+esp_err_t mqtt_publish(const char* topic, const char* data, size_t len,
                        int qos);
 
 /**
@@ -57,13 +56,13 @@ esp_err_t mqtt_publish(const char *topic, const char *data, const size_t len,
  * @param topic Topic name
  * @param qos Quality of Service level
  */
-esp_err_t mqtt_subscribe(const char *topic, int qos);
+esp_err_t mqtt_subscribe(const char* topic, int qos);
 
 /**
  * 监听EVENT_MQTT_CONNECTED事件，调用该方法创建处理任务
  * @brief Task that handles UART messages
  */
-void handle_uart_message_task(void *pvParameters);
+void handle_uart_message_task(void* pvParameters);
 
 #ifdef __cplusplus
 }

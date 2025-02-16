@@ -2,15 +2,20 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
-typedef enum { UART = 0, MQTT } QueueType_t;
+typedef enum { UART = 0, MQTT, LOG, QUEUE_TYPE_MAX } QueueType_t;
 
-typedef struct {
-  QueueType_t type;  // 队列类型
-  void* data;        // 数据指针
-  size_t len;        // 数据长度
-  void* extra_info;  // 扩展信息
+typedef struct
+{
+    QueueType_t type; // 队列类型
+    void* data; // 数据指针
+    size_t len; // 数据长度
+    void* extra_info; // 扩展信息
 } QueueMessage_t;
 
+/**
+ * @brief 初始化消息队列系统, 默认初始化所有队列
+ */
+void queue_manager_full_init();
 /**
  * @brief 初始化消息队列系统
  */
@@ -27,3 +32,9 @@ void queue_manager_destroy(QueueType_t queue_type);
  * @return QueueHandle_t 队列句柄
  */
 QueueHandle_t queue_manager_get_queue(QueueType_t queue_type);
+
+/**
+ * @brief 释放消息内存
+ * @param msg msg
+ */
+void free_queue_message(QueueMessage_t* msg);

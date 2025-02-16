@@ -1,5 +1,7 @@
 idf_component_register(
-    SRCS "src/mqtt_manager.c"
+    SRCS
+        "src/mqtt_manager.c"
+        "src/mqtt_logger.c"
     INCLUDE_DIRS "include"
     REQUIRES esp_netif mqtt common
 )

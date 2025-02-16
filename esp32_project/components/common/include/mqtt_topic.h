@@ -10,4 +10,4 @@
 
 // 系统级主题
 #define TOPIC_SYS_HEARTBEAT "sys/heartbeat"  // 心跳包
-#define TOPIC_SYS_LOG "sys/log"              // 系统日志
+#define TOPIC_DEBUG_LOG "debug/log"            // 系统日志

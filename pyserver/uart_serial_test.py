@@ -38,9 +38,9 @@ def build_frame(protocol_type, data):
 
     # 构建基础帧
     frame = (
-        struct.pack("<H", HEADER)
-        + struct.pack("B", protocol_type)
-        + struct.pack("<H", len(data))
+            struct.pack("<H", HEADER)
+            + struct.pack("B", protocol_type)
+            + struct.pack("<H", len(data))
     )
 
     # 添加数据
@@ -80,7 +80,7 @@ def send_test_frame(port, baudrate, protocol_type, data):
 def send_test_frame_split(port, baudrate, protocol_type, data):
     """拆分数据包并分两次发送，每次间隔 100ms"""
     try:
-        with serial.Serial(port, baudrate, timeout=10) as ser:
+        with serial.Serial(port, baudrate, timeout=10, rtscts=True) as ser:
             frame = build_frame(protocol_type, data)
             print(f"Original frame: {frame.hex(' ').upper()}")
             print(f"Frame length: {len(frame)} bytes")
@@ -93,8 +93,8 @@ def send_test_frame_split(port, baudrate, protocol_type, data):
             part2 = frame[split_index:]
 
             # 打印拆分后的数据
-            print(f"Part 1: {part1.hex(' ').upper()}")
-            print(f"Part 2: {part2.hex(' ').upper()}")
+            print(f"Part 1,len-{len(part1)}: {part1.hex(' ').upper()}")
+            print(f"Part 2,len-{len(part2)}: {part2.hex(' ').upper()}")
 
             # 确保串口已打开
             if ser.is_open:
@@ -135,10 +135,13 @@ def main():
         required=False,
         choices=[ProtocolType.SENSOR, ProtocolType.CONTROL, ProtocolType.LOG],
         help="Command type (1:SENSOR, 2:CONTROL, 3:LOG)",
-        default=ProtocolType.CONTROL,
+        default=ProtocolType.SENSOR,
     )
     parser.add_argument(
         "-d", "--data", default="", help="String data to send (e.g. 'Hello, World!')"
+    )
+    parser.add_argument(
+        "-s", "--split", type=int, default=0, help="Packet split flag"
     )
 
     args = parser.parse_args()
@@ -146,7 +149,7 @@ def main():
     # 转换数据格式
     try:
         data = args.data.encode("utf-8")  # 将字符串编码为字节数据
-    except ValueError:
+    except ValueError as e:
         print(f"Invalid string data: {str(e)}")
         sys.exit(1)
 
@@ -154,8 +157,11 @@ def main():
     # 打印输入数据的十六进制表示
     print(f"Input data in hex: {data.hex(' ').upper()}")
 
-    # send_test_frame(args.port, args.baud, args.type, data)
-    send_test_frame_split(args.port, args.baud, args.type, data)
+    if args.split:
+        send_test_frame_split(args.port, args.baud, args.type, data)
+    else:
+        send_test_frame(args.port, args.baud, args.type, data)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

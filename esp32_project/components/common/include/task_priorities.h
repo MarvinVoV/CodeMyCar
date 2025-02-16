@@ -15,9 +15,10 @@ typedef enum {
 
   TASK_PRIORITY_UART_RECEIVE = 7,          ///< UART接收任务
   TASK_PRIORITY_UART_BUFFER_PROCESS = 6,   ///< UART缓冲区处理任务
-  TASK_PRIORITY_UART_HANDLE_MQTT_MSG = 8,  ///< UART缓冲区处理任务
+  TASK_PRIORITY_UART_HANDLE_MQTT_MSG =8,   ///< UART缓冲区处理任务
 
   TASK_PRIORITY_MQTT_MANAGER = 4,          ///< MQTT通信任务
   TASK_PRIORITY_MQTT_HANDLE_UART_MSG = 5,  ///< MQTT通信任务
+  TASK_PRIORITY_MQTT_LOG = 4,              ///< MQTT LOG任务
   TASK_PRIORITY_WIFI_MANAGER = 3           ///< WiFi管理任务
 } task_priority_t;

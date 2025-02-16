@@ -29,6 +29,7 @@ class ParseState(Enum):
 # 协议帧解析器
 class ProtocolParser:
     def __init__(self):
+        self.crc = None
         self.state = ParseState.WAIT_HEADER_1
         self.frame = None
         self.data_index = 0
@@ -87,6 +88,11 @@ class ProtocolParser:
         hex_data += f", CRC: {self.crc:04X}, Tail: {FRAME_TAIL:04X}"
         print(hex_data)
 
+    def print_plain_text(self):
+        """打印数据帧的 plain text 格式，空格间隔"""
+        data = self.frame['data']
+        print("Plain Text: " + data)
+
     def print_log_data(self):
         """打印日志内容"""
         data = self.frame
@@ -103,7 +109,6 @@ class ProtocolParser:
             print(f"Log data: timestamp={timestamp}, module={module}, level={level}, message={message}")
         else:
             print("Not a log frame")
-
 
 # # 示例使用
 # parser = ProtocolParser()

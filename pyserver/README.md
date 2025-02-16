@@ -27,3 +27,7 @@ python3 uart_serial_test.py
 ```bash
 deactivate
 ```
+
+```shell
+/opt/homebrew/opt/mosquitto/sbin/mosquitto -c /opt/homebrew/etc/mosquitto/mosquitto.conf
+```

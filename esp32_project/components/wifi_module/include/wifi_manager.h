@@ -1,6 +1,5 @@
 #pragma once
 
-#include "esp_event.h"
 
 // WiFi初始化函数
 void wifi_init(void);
