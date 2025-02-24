@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include "log_manager.h"
 #include "servo_service.h"
+#include "ctrl_task.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -52,7 +53,6 @@ TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart4;
 DMA_HandleTypeDef hdma_uart4_rx;
-DMA_HandleTypeDef hdma_uart4_tx;
 
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -62,6 +62,7 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
+
 
 
 /* USER CODE END PV */
@@ -124,7 +125,7 @@ int main(void)
 
 
   // 初始化UART模块
-  UART_Init();
+  init_uart_dma();
 
 
   /* USER CODE END 2 */
@@ -147,9 +148,9 @@ int main(void)
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
 
-  log_manager_init();
-
-  LOG_INFO(LOG_LEVEL_INFO ,"hello log");
+  // log_manager_init();
+  //
+  // LOG_INFO(LOG_LEVEL_INFO ,"hello log");
 
   /* USER CODE END RTOS_QUEUES */
 
@@ -160,7 +161,7 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
 
-
+  uart_task_init();
   // 初始化舵机
   // Servo_HWConfig hw = {
   //     .pwm_tim = &htim2,
@@ -376,9 +377,6 @@ static void MX_DMA_Init(void)
   /* DMA1_Stream0_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
-  /* DMA1_Stream1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
 
 }
 

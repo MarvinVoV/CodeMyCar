@@ -1,4 +1,12 @@
-#pragma once
+/*
+ * uart_protocol.h
+ *
+ *  Created on: Feb 4, 2025
+ *      Author: marvin
+ */
+
+#ifndef SYSTEM_PROTOCOL_INC_PKT_PROTOCOL_H_
+#define SYSTEM_PROTOCOL_INC_PKT_PROTOCOL_H_
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -10,7 +18,6 @@
 #define FRAME_HEADER_HIGH 0xAA
 #define FRAME_HEADER_LOW 0x55
 #define FRAME_TAIL 0x55AA
-// 最大负载长度
 #define PROTOCOL_MAX_DATA_LEN 108
 
 
@@ -178,3 +185,6 @@ void print_hex_data(const uint8_t* data, uint16_t len);
  */
 size_t buffer_to_hex(const uint8_t* src_buffer, size_t src_len,
                      char* dst_buffer, size_t dst_size);
+
+
+#endif /* SYSTEM_PROTOCOL_INC_PKT_PROTOCOL_H_ */

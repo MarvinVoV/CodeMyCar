@@ -14,6 +14,7 @@
 typedef enum {
   CTRL_MOTOR = 0x01,  // 电机
   CTRL_SERVO,         // 舵机
+  CTRL_DEBUG,              // 调试
   CTRL_MAX            // 结束值 - 仅用于判断
 } ctrl_type_t;
 
@@ -42,6 +43,9 @@ typedef struct {
     struct {  // 舵机控制
       uint8_t angle;
     } servo;
+    struct {
+      uint8_t msg[0];
+    } debug_t;
     // ...其他外设结构
   } data;
 } control_cmd_t;

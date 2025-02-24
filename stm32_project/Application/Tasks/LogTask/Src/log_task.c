@@ -4,11 +4,11 @@
  *  Created on: Feb 6, 2025
  *      Author: marvin
  */
+#include <pkt_protocol.h>
 #include "log_task.h"
 
 #include "cmsis_os.h"
 #include "uart_handle.h"
-#include "uart_protocol.h"
 
 // 创建日志任务（在系统初始化时调用）
 void log_task_init(void) {

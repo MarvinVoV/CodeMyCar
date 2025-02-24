@@ -37,12 +37,12 @@ typedef struct {
   uint32_t timestamp;  // 时间戳（单位ms）
   uint16_t module;     // 模块标识（log_module_t）
   uint8_t level;       // 日志级别（log_level_t）
-  char message[128];   // 日志正文
+  char message[100];   // 日志正文
 } log_entry_t;
 #pragma pack(pop)
 
 // 日志协议控制参数
-#define LOG_MAX_LENGTH 128
+#define LOG_MAX_LENGTH 100
 #define LOG_QUEUE_SIZE 16                 // 日志队列缓冲数量
 #define LOG_TIMESTAMP_BASE HAL_GetTick()  // 时间戳基准
 

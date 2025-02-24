@@ -10,134 +10,142 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "cmsis_os.h"
+#include "cmsis_os2.h"
 #include "ctrl_protocol.h"
+#include "queue.h"
 #include "queue_manager.h"
 #include "stm32h7xx_hal_uart.h"
+
 #include "uart_config.h"
 
-size_t buffer_to_hex(const uint8_t* src_buffer, size_t src_len, char* dst_buffer, size_t dst_size);
 
-uint8_t rx_buffer[BUF_SIZE];  // 接收缓冲区
-uint8_t tx_buffer[BUF_SIZE];  // 发送缓冲区
+__ALIGN_BEGIN uint8_t rxBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
+__ALIGN_BEGIN uint8_t txBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
 
-protocol_parser_t parser;
+#define RAW_DATA_QUEUE_SIZE 16  // 定义队列大小
 
-void UART_Init(void) {
-  // 启用空闲中断
-  __HAL_UART_ENABLE_IT(&huart4, UART_IT_IDLE);
-  // 启动UART4的空闲中断和DMA接收
-  HAL_UARTEx_ReceiveToIdle_DMA(&huart4, rx_buffer, BUF_SIZE);
-  protocol_parser_init(&parser);
+// 存储待解析的数据队列
+static osMessageQueueId_t rawDataQueue = NULL;
+
+void init_uart_dma(void)
+{
+    __HAL_UART_ENABLE_IT(&huart4, UART_IT_IDLE);
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart4, rxBuffer, UART_RX_BUFFER_SIZE);
+
+    // 创建消息队列
+    const osMessageQueueAttr_t rawDataQueueAttrs = {
+        .name = "uartRawDataQueue",
+        .attr_bits = 0,
+        .cb_mem = NULL,
+        .cb_size = 0,
+        .mq_mem = NULL,
+        .mq_size = 0
+    };
+    rawDataQueue = osMessageQueueNew(RAW_DATA_QUEUE_SIZE, sizeof(uart_msg_t),
+                                     &rawDataQueueAttrs);
+    if (rawDataQueue == NULL)
+    {
+        // 处理队列创建失败的情况
+        // 例如：记录日志或断言
+        // TODO
+        return;
+    }
+
+    // 注册队列到queue_manager
+    QueueManager_RegisterHandler(QUEUE_TYPE_UART_RAW_DATA, rawDataQueue);
 }
 
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
-  if (huart == &huart4) {
-    // 获取DMA剩余计数
-    uint16_t remaining = __HAL_DMA_GET_COUNTER(huart->hdmarx);
-    // 计算实际接收数据长度
-    uint16_t actual_len = BUF_SIZE - remaining;
+void process_uart_data(const uint8_t* data, const uint16_t len)
+{
+    HAL_UART_Transmit(&huart4, data, len, HAL_MAX_DELAY);
+}
 
-    if (actual_len > 0) {
-      char tmp[100] = {0};
-      buffer_to_hex(rx_buffer, sizeof(rx_buffer), tmp, sizeof(tmp));
-      
+//
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size)
+{
+    if (huart == &huart4)
+    {
+        // 获取DMA剩余计数
+        const uint16_t remaining = __HAL_DMA_GET_COUNTER(huart->hdmarx);
+        // 计算实际接收数据长度
+        const uint16_t actual_len = UART_RX_BUFFER_SIZE - remaining;
 
-      // 解析接收到的数据
-      for (uint16_t i = 0; i < actual_len; i++) {
-        if (protocol_parse_byte(&parser, rx_buffer[i])) {
-          // 解析成功
-        	//TODO 考虑累积缓冲区应对拆数据包的情况
-          // if (parser.frame.type == PROTOCOL_TYPE_CONTROL) {
-            
-            // if (QueueManager_DispatchCommand((control_cmd_t *)parser.frame.data) != osOK) {
-            //   // TODO log
-            // }
-          // }
-          // 实现回显 即通过构造回显帧 发送到串口
-          UART_Send_To_Esp(parser.frame.data, parser.frame.len, parser.frame.type);
-
-
-
-          free(parser.frame.data);
-          protocol_parser_init(&parser);
+        if (actual_len > 0)
+        {
+            // 动态分配临时缓冲区（或使用静态全局缓冲区）
+            uint8_t* temp_buf = (uint8_t*) malloc(actual_len);
+            if (temp_buf != NULL)
+            {
+                // 拷贝数据到临时缓冲区
+                memcpy(temp_buf, rxBuffer, actual_len);
+                // // 创建消息对象（栈分配）
+                const uart_msg_t msg = {
+                    .data = temp_buf,
+                    .len = actual_len
+                };
+                // xQueueSendFromISR()
+                if (osMessageQueuePut(rawDataQueue, &msg, 0, 0) != osOK)
+                {
+                    // vPortFree(temp_buf); // 队列满时立即释放内存
+                    free(temp_buf);
+                }
+            }
         }
-      }
+        // 立即重启DMA（使用原缓冲区）
+        HAL_UARTEx_ReceiveToIdle_DMA(huart, rxBuffer, UART_RX_BUFFER_SIZE);
+    }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
+{
+    if (huart == &huart4)
+    {
+    }
+}
+
+
+bool UART_Send_To_Esp(uint8_t* data, uint16_t length, protocol_type_t type)
+{
+    if (data == NULL || length == 0)
+    {
+        return false;
+    }
+    if (type <= PROTOCOL_TYPE_MIN || type >= PROTOCOL_TYPE_MAX)
+    {
+        return false;
     }
 
-    // 重新启动DMA接收
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart4, rx_buffer, BUF_SIZE);
-  }
-}
+    // 打包协议帧
+    uint16_t frame_len = 0;
+    uint8_t* packed_frame = protocol_pack_frame(type, data, length, &frame_len);
 
-bool UART_Send_To_Esp(uint8_t *data, uint16_t length, protocol_type_t type) {
-  if (data == NULL || length == 0) {
-    return false;
-  }
-  if (type < PROTOCOL_TYPE_MIN || type >= PROTOCOL_TYPE_MAX) {
-    return false;
-  }
-
-  // 打包协议帧
-  uint16_t frame_len = 0;
-  uint8_t *packed_frame = protocol_pack_frame(type, data, length, &frame_len);
-
-  if (packed_frame != NULL && frame_len > 0) {
-    HAL_StatusTypeDef status =
-        HAL_UART_Transmit_DMA(&huart4, packed_frame, frame_len);
-    if (status == HAL_OK) {
-      free(packed_frame);
-      return true;
-    } else {
-      // TODO log
+    if (packed_frame != NULL && frame_len > 0)
+    {
+        HAL_StatusTypeDef status =
+            HAL_UART_Transmit_DMA(&huart4, packed_frame, frame_len);
+        if (status == HAL_OK)
+        {
+            free(packed_frame);
+            return true;
+        }
+        else
+        {
+            // TODO log
+        }
     }
-  }
-  if (packed_frame != NULL) {
-    free(packed_frame);
-  }
-  return false;
-}
-
-bool Send_Log(log_entry_t *log_entry) {
-  if (log_entry == NULL) {
+    if (packed_frame != NULL)
+    {
+        free(packed_frame);
+    }
     return false;
-  }
-  return UART_Send_To_Esp((uint8_t *)log_entry, sizeof(log_entry_t),
-                          PROTOCOL_TYPE_LOG);
 }
 
-/**
- * @brief 将缓冲区内容以十六进制格式打印到目标缓冲区
- * 
- * @param src_buffer 源缓冲区
- * @param src_len 源缓冲区长度
- * @param dst_buffer 目标缓冲区
- * @param dst_size 目标缓冲区大小
- * @return size_t 返回写入目标缓冲区的字符数（不包括终止符'\0'）
- */
-size_t buffer_to_hex(const uint8_t* src_buffer, size_t src_len, char* dst_buffer, size_t dst_size) {
-  if (src_buffer == NULL || dst_buffer == NULL || dst_size == 0) {
-      return 0; // 参数无效
-  }
-
-  size_t written = 0; // 已写入目标缓冲区的字符数
-  for (size_t i = 0; i < src_len; i++) {
-      // 格式化为两位十六进制数，并添加空格
-      int bytes_needed = snprintf(dst_buffer + written, dst_size - written, "%02X ", src_buffer[i]);
-      if (bytes_needed < 0 || written + bytes_needed >= dst_size) {
-          // 如果目标缓冲区空间不足，截断并返回已写入的字符数
-          break;
-      }
-      written += bytes_needed;
-  }
-
-  // 移除最后一个多余的空格（如果有的话）
-  if (written > 0 && dst_buffer[written - 1] == ' ') {
-      dst_buffer[written - 1] = '\0';
-      written--;
-  } else {
-      dst_buffer[written] = '\0'; // 确保字符串以'\0'结尾
-  }
-
-  return written;
+bool Send_Log(log_entry_t* log_entry)
+{
+    if (log_entry == NULL)
+    {
+        return false;
+    }
+    return UART_Send_To_Esp((uint8_t*)log_entry, sizeof(log_entry_t),
+                            PROTOCOL_TYPE_LOG);
 }
