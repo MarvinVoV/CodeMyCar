@@ -42,33 +42,21 @@ void uart_task_init()
 
 void uart_task()
 {
-    osMessageQueueId_t rawDataQueue = QueueManager_GetQueueByType(QUEUE_TYPE_UART_RAW_DATA);
-    if (rawDataQueue == NULL)
-    {
-        // todo
-        osThreadTerminate(NULL);
-    }
-    uart_msg_t received_msg;
     while (1)
     {
-        // 阻塞式等待队列消息
-        if (osMessageQueueGet(rawDataQueue, &received_msg, NULL, osWaitForever) == osOK)
+        if (xSemaphoreTake(uart_dma_buffer.semaphore, pdMS_TO_TICKS(1000)) == pdTRUE)
         {
-            // 通过累积缓冲区接收并解析数据
-            // protocol_receiver_append(&receiver, msg.data, msg.len);
-            process_uart_data(received_msg.data, received_msg.len);
-
-            // 处理完成后释放内存
-            if (received_msg.data != NULL)
+            if (uart_dma_buffer.length > 0)
             {
-                // vPortFree((void*)received_msg.data);
-                free((uint8_t*)received_msg.data);
+                // 获取非活动缓冲区的索引和长度
+                const uint8_t inactive_buffer = uart_dma_buffer.current ^ 1;
+                uint8_t* data = uart_dma_buffer.buffer[inactive_buffer];
+                const uint16_t len = uart_dma_buffer.length;
+
+                // 无效化 Cache（H7 的 Cache 行大小为 32 字节）
+                SCB_InvalidateDCache_by_Addr(data, len);
+                process_uart_data(data, len);
             }
-        }
-        else
-        {
-            // 添加错误处理逻辑 todo
-            osDelay(10); // 防止错误时CPU占用过高
         }
     }
 }

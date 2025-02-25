@@ -19,40 +19,39 @@
 #include "uart_config.h"
 
 
-__ALIGN_BEGIN uint8_t rxBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
-__ALIGN_BEGIN uint8_t txBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
+// __ALIGN_BEGIN uint8_t rxBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
+// __ALIGN_BEGIN uint8_t txBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
 
 #define RAW_DATA_QUEUE_SIZE 16  // 定义队列大小
 
-// 存储待解析的数据队列
-static osMessageQueueId_t rawDataQueue = NULL;
+uart_dma_buffer_t uart_dma_buffer;
+
+
+void start_reception()
+{
+    // 先切换缓冲区
+    const uint8_t next_buffer = uart_dma_buffer.current ^ 1;
+    uart_dma_buffer.current = next_buffer;
+
+    // 启动DMA接收，交替使用缓冲区
+    HAL_StatusTypeDef status = HAL_UARTEx_ReceiveToIdle_DMA(&huart4, uart_dma_buffer.buffer[next_buffer],
+                                                            UART_RX_BUFFER_SIZE);
+    if (status != HAL_OK)
+    {
+        // error
+    }
+
+}
 
 void init_uart_dma(void)
 {
+    uart_dma_buffer.current = 0;
+    uart_dma_buffer.length = 0;
+    uart_dma_buffer.semaphore = xSemaphoreCreateBinary();
+    xSemaphoreGive(uart_dma_buffer.semaphore); // 初始释放
+
     __HAL_UART_ENABLE_IT(&huart4, UART_IT_IDLE);
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart4, rxBuffer, UART_RX_BUFFER_SIZE);
-
-    // 创建消息队列
-    const osMessageQueueAttr_t rawDataQueueAttrs = {
-        .name = "uartRawDataQueue",
-        .attr_bits = 0,
-        .cb_mem = NULL,
-        .cb_size = 0,
-        .mq_mem = NULL,
-        .mq_size = 0
-    };
-    rawDataQueue = osMessageQueueNew(RAW_DATA_QUEUE_SIZE, sizeof(uart_msg_t),
-                                     &rawDataQueueAttrs);
-    if (rawDataQueue == NULL)
-    {
-        // 处理队列创建失败的情况
-        // 例如：记录日志或断言
-        // TODO
-        return;
-    }
-
-    // 注册队列到queue_manager
-    QueueManager_RegisterHandler(QUEUE_TYPE_UART_RAW_DATA, rawDataQueue);
+    start_reception();
 }
 
 void process_uart_data(const uint8_t* data, const uint16_t len)
@@ -69,30 +68,11 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size)
         const uint16_t remaining = __HAL_DMA_GET_COUNTER(huart->hdmarx);
         // 计算实际接收数据长度
         const uint16_t actual_len = UART_RX_BUFFER_SIZE - remaining;
-
-        if (actual_len > 0)
-        {
-            // 动态分配临时缓冲区（或使用静态全局缓冲区）
-            uint8_t* temp_buf = (uint8_t*) malloc(actual_len);
-            if (temp_buf != NULL)
-            {
-                // 拷贝数据到临时缓冲区
-                memcpy(temp_buf, rxBuffer, actual_len);
-                // // 创建消息对象（栈分配）
-                const uart_msg_t msg = {
-                    .data = temp_buf,
-                    .len = actual_len
-                };
-                // xQueueSendFromISR()
-                if (osMessageQueuePut(rawDataQueue, &msg, 0, 0) != osOK)
-                {
-                    // vPortFree(temp_buf); // 队列满时立即释放内存
-                    free(temp_buf);
-                }
-            }
-        }
-        // 立即重启DMA（使用原缓冲区）
-        HAL_UARTEx_ReceiveToIdle_DMA(huart, rxBuffer, UART_RX_BUFFER_SIZE);
+        uart_dma_buffer.length  = actual_len;
+        start_reception(actual_len);
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        xSemaphoreGiveFromISR(uart_dma_buffer.semaphore, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
 }
 
@@ -100,6 +80,8 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
 {
     if (huart == &huart4)
     {
+        char* s = "errorcallback";
+        process_uart_data((uint8_t*)s, strlen(s));
     }
 }
 

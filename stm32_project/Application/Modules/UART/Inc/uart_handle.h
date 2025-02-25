@@ -14,13 +14,15 @@
 
 #include "cmsis_os2.h"
 #include "log_protocol.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
 #include "stm32h7xx_hal.h"
 
 // 定义UART缓冲区大小
 #define UART_RX_BUFFER_SIZE (PROTOCOL_MAX_DATA_LEN * 4)
 
-extern __ALIGN_BEGIN uint8_t rxBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
-extern __ALIGN_BEGIN uint8_t txBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
+// extern __ALIGN_BEGIN uint8_t rxBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
+// extern __ALIGN_BEGIN uint8_t txBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
 
 typedef struct
 {
@@ -28,8 +30,18 @@ typedef struct
     uint16_t len;
 } uart_msg_t;
 
+
+typedef struct
+{
+    uint8_t buffer[2][UART_RX_BUFFER_SIZE] __ALIGNED(32);
+    volatile uint8_t current; // 当前接收缓冲区索引
+    volatile uint16_t length; // 有效数据长度
+    SemaphoreHandle_t semaphore; // 二值信号量
+} uart_dma_buffer_t;
+
 #define QUEUE_ITEM_SIZE sizeof(uart_msg_t*) // 存储数据指针
 
+extern uart_dma_buffer_t uart_dma_buffer;
 void init_uart_dma(void);
 
 /**
