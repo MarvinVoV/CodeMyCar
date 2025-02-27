@@ -6,6 +6,7 @@
  */
 #include "ctrl_task.h"
 
+#include "log_manager.h"
 #include "pkt_protocol_buf.h"
 #include "queue_manager.h"
 #include "uart_handle.h"
@@ -19,18 +20,25 @@ static protocol_receiver receiver;
 
 static void dispatcher(uint8_t type, const uint8_t* frame_data, uint16_t frame_len);
 
+static void process_raw_data(uint8_t* data, uint16_t len);
 
-void uart_task_init()
+/**
+ * @brief 控制任务执行函数
+ * @param args args
+ */
+static void CtrlTask_Execute(void* args);
+
+void CtrlTask_Init()
 {
     const osThreadAttr_t rawDataReadTaskAttrs = {
         .name = "RawDataReadTask",
         .stack_size = 512 * 4,
         .priority = (osPriority_t)osPriorityNormal
     };
-    rawDataReadTaskHandle = osThreadNew(uart_task, NULL, &rawDataReadTaskAttrs);
+    rawDataReadTaskHandle = osThreadNew(CtrlTask_Execute, NULL, &rawDataReadTaskAttrs);
     if (rawDataReadTaskHandle == NULL)
     {
-        // todo
+        LOG_ERROR(LOG_MODULE_SYSTEM, "Create CtrlTask thread error.");
     }
 
     // protocol_receiver_init(&receiver, ACCUMULATE_BUF_SIZE, dispatcher);
@@ -40,11 +48,11 @@ void uart_task_init()
     // }
 }
 
-void uart_task()
+static void CtrlTask_Execute(void* args)
 {
     while (1)
     {
-        if (xSemaphoreTake(uart_dma_buffer.semaphore, pdMS_TO_TICKS(1000)) == pdTRUE)
+        if (xSemaphoreTake(uart_dma_buffer.semaphore, osWaitForever) == pdTRUE)
         {
             if (uart_dma_buffer.length > 0)
             {
@@ -55,13 +63,18 @@ void uart_task()
 
                 // 无效化 Cache（H7 的 Cache 行大小为 32 字节）
                 SCB_InvalidateDCache_by_Addr(data, len);
-                process_uart_data(data, len);
+                // 处理数据
+                process_raw_data(data, len);
             }
         }
     }
 }
 
-void dispatcher(uint8_t type, const uint8_t* frame_data, uint16_t frame_len)
+static void dispatcher(uint8_t type, const uint8_t* frame_data, uint16_t frame_len)
 {
     // todo
+}
+
+static void process_raw_data(uint8_t* data, uint16_t len)
+{
 }

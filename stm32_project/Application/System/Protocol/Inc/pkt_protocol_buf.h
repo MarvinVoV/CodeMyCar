@@ -27,12 +27,12 @@ typedef void (*frame_callback)(uint8_t type, const uint8_t* data, uint16_t len);
  */
 typedef struct
 {
-    uint8_t* buffer; // 动态分配的缓冲区
-    uint16_t buffer_size; // 缓冲区总大小
-    uint16_t write_pos; // 当前写入位置
-    uint16_t processed_pos; // 跟踪解析处理位置
+    uint8_t* buffer;          // 动态分配的缓冲区
+    uint16_t buffer_size;     // 缓冲区总大小
+    uint16_t write_pos;       // 当前写入位置
+    uint16_t processed_pos;   // 跟踪解析处理位置
     protocol_parser_t parser; // 协议解析器
-    frame_callback callback; // 用户回调函数
+    frame_callback callback;  // 用户回调函数
 } protocol_receiver;
 
 
@@ -56,7 +56,6 @@ void protocol_receiver_append(protocol_receiver* receiver, const uint8_t* data, 
  * @brief 销毁接收器，释放资源
  */
 void protocol_receiver_destroy(protocol_receiver* receiver);
-
 
 
 #endif /* SYSTEM_PROTOCOL_INC_PKT_PROTOCOL_BUF_H_ */

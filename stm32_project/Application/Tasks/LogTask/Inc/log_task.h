@@ -8,15 +8,10 @@
 #ifndef TASKS_LOGTASK_INC_LOG_TASK_H_
 #define TASKS_LOGTASK_INC_LOG_TASK_H_
 
-#include "queue_manager.h"
 /**
  * 创建日志任务
  */
-void log_task_init(void);
+void LogTask_Init(void);
 
-/**
- * 日志任务
- */
-void log_task(void* argument);
 
 #endif /* TASKS_LOGTASK_INC_LOG_TASK_H_ */

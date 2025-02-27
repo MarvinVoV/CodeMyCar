@@ -4,36 +4,53 @@
  *  Created on: Feb 6, 2025
  *      Author: marvin
  */
-#include <pkt_protocol.h>
+#include "pkt_protocol.h"
 #include "log_task.h"
 
-#include "cmsis_os.h"
+#include "cmsis_os2.h"
+#include "log_manager.h"
+#include "queue_manager.h"
 #include "uart_handle.h"
 
-// 创建日志任务（在系统初始化时调用）
-void log_task_init(void) {
-  const osThreadAttr_t log_task_attributes = {
-      .name = "LogTask",
-      .stack_size = 1024,                 // 根据需求调整
-      .priority = osPriorityBelowNormal,  // 低于关键任务
-  };
-  osThreadNew(log_task, NULL, &log_task_attributes);
+static void LogTask_Execute(void* argument);
+
+/**
+ * @brief  LogTask初始化
+ */
+void LogTask_Init(void)
+{
+    const osThreadAttr_t log_task_attributes = {
+        .name = "LogTask",
+        .stack_size = 1024,                // 根据需求调整
+        .priority = osPriorityBelowNormal, // 低于关键任务
+    };
+    osThreadNew(LogTask_Execute, NULL, &log_task_attributes);
 }
 
-void log_task(void* argument) {
-  log_entry_t entry;
-  osMessageQueueId_t mq_id = QueueManager_GetQueueByType(QUEUE_TYPE_LOG);
-  if (mq_id == NULL) {
-    // TODO log
-    osThreadTerminate(NULL);
-  }
-  // check log queue
-  while (1) {
-    osStatus_t status = osMessageQueueGet(mq_id, &entry, NULL, osWaitForever);
-    if (status == osOK) {
-      Send_Log(&entry);
-    } else {
-      // TODO log
+/**
+ * @brief LogTask执行函数
+ * @param argument args
+ */
+static void LogTask_Execute(void* argument)
+{
+    osMessageQueueId_t log_queue = QueueManager_GetQueueByType(QUEUE_TYPE_LOG);
+    if (log_queue == NULL)
+    {
+        /*错误处理*/
+        osThreadTerminate(NULL);
     }
-  }
+
+    log_entry_t* entry;
+    while (1)
+    {
+        // 等待队列中的日志（永久阻塞）
+        if (osMessageQueueGet(log_queue, &entry, NULL, osWaitForever) == osOK)
+        {
+            // 日志处理
+            UART_Send_Protocol_Log(entry);
+
+            // 释放内存块
+            osMemoryPoolFree(log_pool, entry);
+        }
+    }
 }

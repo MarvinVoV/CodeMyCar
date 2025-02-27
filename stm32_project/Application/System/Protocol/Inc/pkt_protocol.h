@@ -49,11 +49,11 @@
 
 typedef enum
 {
-    PROTOCOL_TYPE_MIN = 0x00, // 起始值
+    PROTOCOL_TYPE_MIN = 0x00,    // 起始值
     PROTOCOL_TYPE_SENSOR = 0x01, // 传感器数据
-    PROTOCOL_TYPE_CONTROL, // 控制指令
-    PROTOCOL_TYPE_LOG, // 系统日志
-    PROTOCOL_TYPE_MAX // 结束值
+    PROTOCOL_TYPE_CONTROL,       // 控制指令
+    PROTOCOL_TYPE_LOG,           // 系统日志
+    PROTOCOL_TYPE_MAX            // 结束值
 } protocol_type_t;
 
 /**
@@ -64,8 +64,8 @@ typedef enum
 typedef struct
 {
     uint16_t header; // 帧头 - 0xAA55
-    uint8_t type; // 协议类型
-    uint16_t len; // 数据长度 最大支持65535
+    uint8_t type;    // 协议类型
+    uint16_t len;    // 数据长度 最大支持65535
     uint8_t data[0]; // 柔性数组，用于动态数据
 } protocol_header_t;
 #pragma pack(pop)
@@ -78,11 +78,11 @@ typedef struct
 typedef struct
 {
     uint16_t header; // 帧头 (固定值 0xAA55)
-    uint8_t type; // 协议类型
-    uint16_t len; // 数据长度 最大支持65535
-    uint8_t* data; // 数据内容 (动态分配)
-    uint16_t crc; // CRC16 校验值
-    uint16_t tail; // 帧尾 (固定值 0x55AA)
+    uint8_t type;    // 协议类型
+    uint16_t len;    // 数据长度 最大支持65535
+    uint8_t* data;   // 数据内容 (动态分配)
+    uint16_t crc;    // CRC16 校验值
+    uint16_t tail;   // 帧尾 (固定值 0x55AA)
 } protocol_frame_t;
 
 /**
@@ -108,9 +108,9 @@ typedef enum
  */
 typedef struct
 {
-    parse_state_t state; // 协议解析状态
+    parse_state_t state;    // 协议解析状态
     protocol_frame_t frame; // 解析出来的协议头
-    uint16_t data_index; // 解析出来的数据
+    uint16_t data_index;    // 解析出来的数据
 } protocol_parser_t;
 
 

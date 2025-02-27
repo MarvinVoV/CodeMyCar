@@ -11,7 +11,7 @@
 #include <stdio.h>
 
 #include "cmsis_os2.h"
-#include "ctrl_protocol.h"
+#include "log_manager.h"
 #include "queue.h"
 #include "queue_manager.h"
 #include "stm32h7xx_hal_uart.h"
@@ -27,6 +27,15 @@
 uart_dma_buffer_t uart_dma_buffer;
 
 
+/**
+ * 发送日志到 ESP (需要外接 ESP32)
+ * @param data log data
+ * @param length length
+ * @param type protocol_type
+ * @return bool
+ */
+static bool UART_Send_To_Esp(const uint8_t* data, uint16_t length, protocol_type_t type);
+
 void start_reception()
 {
     // 先切换缓冲区
@@ -38,26 +47,23 @@ void start_reception()
                                                             UART_RX_BUFFER_SIZE);
     if (status != HAL_OK)
     {
-        // error
+        char err_msg[64];
+        sprintf(err_msg, "HAL_UARTEx_ReceiveToIdle_DMA Error");
+        LOG_DEBUG_UART(&huart1, "UART Error: %s", err_msg);
     }
-
 }
 
-void init_uart_dma(void)
+void Init_UART_DMA(void)
 {
     uart_dma_buffer.current = 0;
     uart_dma_buffer.length = 0;
     uart_dma_buffer.semaphore = xSemaphoreCreateBinary();
     xSemaphoreGive(uart_dma_buffer.semaphore); // 初始释放
 
-    __HAL_UART_ENABLE_IT(&huart4, UART_IT_IDLE);
+    __HAL_UART_ENABLE_IT(&huart4, UART_IT_IDLE | UART_IT_PE | UART_IT_ERR);
     start_reception();
 }
 
-void process_uart_data(const uint8_t* data, const uint16_t len)
-{
-    HAL_UART_Transmit(&huart4, data, len, HAL_MAX_DELAY);
-}
 
 //
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size)
@@ -68,7 +74,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size)
         const uint16_t remaining = __HAL_DMA_GET_COUNTER(huart->hdmarx);
         // 计算实际接收数据长度
         const uint16_t actual_len = UART_RX_BUFFER_SIZE - remaining;
-        uart_dma_buffer.length  = actual_len;
+        uart_dma_buffer.length = actual_len;
         start_reception(actual_len);
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
         xSemaphoreGiveFromISR(uart_dma_buffer.semaphore, &xHigherPriorityTaskWoken);
@@ -80,49 +86,25 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
 {
     if (huart == &huart4)
     {
-        char* s = "errorcallback";
-        process_uart_data((uint8_t*)s, strlen(s));
+        const uint32_t err = huart->ErrorCode;
+        char err_msg[64];
+
+        if (err & HAL_UART_ERROR_PE) strcat(err_msg, "ParityError ");
+        if (err & HAL_UART_ERROR_NE) strcat(err_msg, "NoiseError ");
+        if (err & HAL_UART_ERROR_FE) strcat(err_msg, "FramingError ");
+        if (err & HAL_UART_ERROR_ORE) strcat(err_msg, "OverrunError ");
+        if (err & HAL_UART_ERROR_DMA) strcat(err_msg, "DMAError ");
+
+        LOG_DEBUG_UART(&huart1, "UART Error: %s", err_msg);
+        // 清除错误标志
+        __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_PEF | UART_CLEAR_NEF | UART_CLEAR_FEF | UART_CLEAR_OREF);
+        // 重置错误码
+        huart->ErrorCode = HAL_UART_ERROR_NONE;
     }
 }
 
 
-bool UART_Send_To_Esp(uint8_t* data, uint16_t length, protocol_type_t type)
-{
-    if (data == NULL || length == 0)
-    {
-        return false;
-    }
-    if (type <= PROTOCOL_TYPE_MIN || type >= PROTOCOL_TYPE_MAX)
-    {
-        return false;
-    }
-
-    // 打包协议帧
-    uint16_t frame_len = 0;
-    uint8_t* packed_frame = protocol_pack_frame(type, data, length, &frame_len);
-
-    if (packed_frame != NULL && frame_len > 0)
-    {
-        HAL_StatusTypeDef status =
-            HAL_UART_Transmit_DMA(&huart4, packed_frame, frame_len);
-        if (status == HAL_OK)
-        {
-            free(packed_frame);
-            return true;
-        }
-        else
-        {
-            // TODO log
-        }
-    }
-    if (packed_frame != NULL)
-    {
-        free(packed_frame);
-    }
-    return false;
-}
-
-bool Send_Log(log_entry_t* log_entry)
+bool UART_Send_Protocol_Log(log_entry_t* log_entry)
 {
     if (log_entry == NULL)
     {
@@ -130,4 +112,27 @@ bool Send_Log(log_entry_t* log_entry)
     }
     return UART_Send_To_Esp((uint8_t*)log_entry, sizeof(log_entry_t),
                             PROTOCOL_TYPE_LOG);
+}
+
+static bool UART_Send_To_Esp(const uint8_t* data, const uint16_t length, const protocol_type_t type)
+{
+    // 打包协议帧
+    uint16_t frame_len = 0;
+    uint8_t* packed_frame = protocol_pack_frame(type, data, length, &frame_len);
+
+    if (packed_frame != NULL && frame_len > 0)
+    {
+        const HAL_StatusTypeDef status =
+            HAL_UART_Transmit_DMA(&huart4, packed_frame, frame_len);
+        if (status == HAL_OK)
+        {
+            free(packed_frame);
+            return true;
+        }
+    }
+    if (packed_frame != NULL)
+    {
+        free(packed_frame);
+    }
+    return false;
 }

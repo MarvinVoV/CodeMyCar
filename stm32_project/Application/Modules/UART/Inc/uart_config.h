@@ -12,6 +12,7 @@
 
 // 声明全局 UART 句柄
 extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart1;
 
 
 

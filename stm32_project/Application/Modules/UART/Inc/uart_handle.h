@@ -34,34 +34,23 @@ typedef struct
 typedef struct
 {
     uint8_t buffer[2][UART_RX_BUFFER_SIZE] __ALIGNED(32);
-    volatile uint8_t current; // 当前接收缓冲区索引
-    volatile uint16_t length; // 有效数据长度
+    volatile uint8_t current;    // 当前接收缓冲区索引
+    volatile uint16_t length;    // 有效数据长度
     SemaphoreHandle_t semaphore; // 二值信号量
 } uart_dma_buffer_t;
 
 #define QUEUE_ITEM_SIZE sizeof(uart_msg_t*) // 存储数据指针
 
 extern uart_dma_buffer_t uart_dma_buffer;
-void init_uart_dma(void);
-
-/**
-  * @brief  处理接收到的 UART 数据
-  * @param  data 指向接收到数据的缓冲区
-  * @param  len  接收到的数据字节数
-  * @retval None
-  */
-void process_uart_data(const uint8_t* data, uint16_t len);
+void Init_UART_DMA(void);
 
 
 /**
- * 特指UART4，负责和ESP32通信
+ * @brief 发送构建好的日志协议数据到外设(需要外接esp32)
+ * @param log_entry log_entry
+ * @return bool
  */
-bool UART_Send_To_Esp(uint8_t* data, uint16_t length, protocol_type_t type);
-
-/**
- * 发送日志
- */
-bool Send_Log(log_entry_t* log_entry);
+bool UART_Send_Protocol_Log(log_entry_t* log_entry);
 
 
 #endif /* INC_UART_HANDLE_H_ */
