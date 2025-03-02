@@ -8,6 +8,7 @@
 #ifndef SYSTEM_PROTOCOL_INC_CTRL_PROTOCOL_H_
 #define SYSTEM_PROTOCOL_INC_CTRL_PROTOCOL_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #pragma pack(push, 1)
@@ -15,7 +16,7 @@ typedef enum
 {
     CTRL_MOTOR = 0x01, // 电机
     CTRL_SERVO,        // 舵机
-    CTRL_DEBUG,        // 调试
+    CTRL_TEXT,         // 调试
     CTRL_MAX           // 结束值 - 仅用于判断
 } ctrl_type_t;
 
@@ -30,21 +31,20 @@ typedef enum
 
 typedef struct
 {
-    uint8_t left_speed;   // 速度 (0-255)
-    uint8_t right_speed;  // 速度 (0-255)
-    uint8_t acceleration; // 加速度 0-100
+    uint8_t cmd_type; // 命令类型 @see motor_command_t
+    uint8_t left;     // 速度 (0-255)
+    uint8_t right;    // 速度 (0-255)
+    uint8_t acc;      // 加速度 0-100
 } motor_data_t;
 
 typedef struct
 {
-    uint8_t ctrl_id;   // 控制器ID
-    uint8_t ctrl_type; // 控制类型 @see ctrl_type_t
+    uint8_t ctrl_id;       // 控制器ID
+    ctrl_type_t ctrl_type; // 控制类型 @see ctrl_type_t
     union
     {
         struct
         {
-            // 电机控制
-            motor_command_t cmd;
             motor_data_t data;
         } motor;
 
@@ -56,12 +56,22 @@ typedef struct
 
         struct
         {
-            uint8_t msg[0];
-        } debug_t;
+            uint8_t len;
+            uint8_t msg[]; // 柔性数组（C99特性）
+        } text;
 
         // ...其他外设结构
     } data;
 } control_cmd_t;
 #pragma pack(pop)
+
+
+/**
+ * @brief 校验控制命令
+ * @param payload payload
+ * @param frame_len payload len
+ * @return valid result
+ */
+bool validate_control_cmd(const uint8_t* payload, const uint16_t frame_len);
 
 #endif /* SYSTEM_PROTOCOL_INC_CTRL_PROTOCOL_H_ */

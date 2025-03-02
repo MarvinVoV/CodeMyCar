@@ -1,7 +1,7 @@
 import paho.mqtt.client as mqtt
 import struct
-from datetime import datetime
-from pkt_protocol_parser import ProtocolParser
+
+from protocol import DevicePayload, ProtocolFrameBuilder, ProtocolType, ProtocolParser
 
 # Broker 配置
 BROKER_IP = "127.0.0.1"  # MQTT Broker 的 IP 地址，请确保这是正确的IP
@@ -89,35 +89,31 @@ def on_message(client, userdata, msg, properties=None):
     """
     处理接收到的消息
     """
-    # print(f"Received from ESP32 [{msg.topic}],msg binary length {len(msg.payload)}")
-    if msg.topic == TOPIC_SUB_LOG:
-        print(msg.payload.decode('utf-8'))
-        return
+    print(f"Received from ESP32 [{msg.topic}],msg binary length {len(msg.payload)}")
+    # if msg.topic == TOPIC_SUB_LOG:
+    #     print(msg.payload.decode('utf-8'))
+    #     return
 
     # 先尝试解析为字符串
-    try:
-        decoded_message = msg.payload.decode("utf-8")
-        print(f"Received string message: {decoded_message}")
-    except UnicodeDecodeError:
-        print("Received message is not a valid UTF-8 string")
-    print("Raw binary data:", " ".join(f"{byte:02X}" for byte in msg.payload))
+    # try:
+    #     decoded_message = msg.payload.decode("utf-8")
+    #     print(f"Received string message: {decoded_message}")
+    # except UnicodeDecodeError:
+    #     print("Received message is not a valid UTF-8 string")
+    # print("Raw binary data:", " ".join(f"{byte:02X}" for byte in msg.payload))
     #
-    # # 尝试解析二进制数据
-    # print("Parsing binary data...")
-    # parser = ProtocolParser()
-    #
-    # # 循环逐字节解析二进制数据
-    # for byte in msg.payload:
-    #     result = parser.parse_byte(byte)
-    #     if result:
-    #         print("解析完成")
-    #         parser.print_hex()
-    #         parser.print_plain_text()
-    #         # parser.print_log_data()
-    #
-    #         break
-    # else:
-    #     print("数据解析未完成，继续接收数据")
+    if msg.topic == TOPIC_SUB_SENSOR:
+        print("Parsing binary data...")
+        parser = ProtocolParser()
+        for byte in msg.payload:
+            result = parser.parse_byte(byte)
+            if result:
+                print("解析完成")
+                payload = DevicePayload.from_bytes(parser.frame['data'])
+                print(payload.parse())
+                break
+        else:
+            print("数据解析未完成，继续接收数据")
 
 
 def send_command(client):
@@ -129,8 +125,16 @@ def send_command(client):
         if command.lower() == "exit":
             break
         # NOTE 对于指令内容 约定字符串格式
-        command_with_null = command + "\0"
-        client.publish(TOPIC_PUB, command_with_null)
+        # command_with_null = command + "\0"
+        # todo 临时测试 command指定为 text
+        payload = DevicePayload().build_text(
+            message=command
+        )
+        # 构建协议帧
+        frame = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value).set_payload(payload).build_frame()
+        # print hex
+        print(" ".join(f"{byte:02X}" for byte in frame))
+        client.publish(TOPIC_PUB, frame)
         print(f"命令 '{command}' 已发送到主题 '{TOPIC_PUB}'")
 
 

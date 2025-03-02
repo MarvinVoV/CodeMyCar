@@ -19,9 +19,6 @@
 #include "uart_config.h"
 
 
-// __ALIGN_BEGIN uint8_t rxBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
-// __ALIGN_BEGIN uint8_t txBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
-
 #define RAW_DATA_QUEUE_SIZE 16  // 定义队列大小
 
 uart_dma_buffer_t uart_dma_buffer;
@@ -81,13 +78,26 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* huart, uint16_t Size)
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
 }
+//
+// void send_hex_via_uart( const uint8_t *data, uint16_t len) {
+//     char buffer[256];  // 缓冲区大小需足够容纳转换后的字符串（每字节3字符 + 换行符）
+//     uint16_t pos = 0;
+//
+//     // 转换数据为十六进制字符串
+//     for (uint16_t i = 0; i < len && pos < sizeof(buffer); i++) {
+//         pos += snprintf(&buffer[pos], sizeof(buffer) - pos, "%02X ", data[i]);
+//     }
+//
+//     LOG_DEBUG_UART(&huart1, "%s\n", buffer);
+//     LOG_DEBUG_UART(&huart1, "len=%d\n", len);
+// }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
 {
     if (huart == &huart4)
     {
         const uint32_t err = huart->ErrorCode;
-        char err_msg[64];
+        char err_msg[64] = {0};
 
         if (err & HAL_UART_ERROR_PE) strcat(err_msg, "ParityError ");
         if (err & HAL_UART_ERROR_NE) strcat(err_msg, "NoiseError ");

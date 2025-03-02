@@ -21,8 +21,6 @@
 // 定义UART缓冲区大小
 #define UART_RX_BUFFER_SIZE (PROTOCOL_MAX_DATA_LEN * 4)
 
-// extern __ALIGN_BEGIN uint8_t rxBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
-// extern __ALIGN_BEGIN uint8_t txBuffer[UART_RX_BUFFER_SIZE] __ALIGN_END;
 
 typedef struct
 {

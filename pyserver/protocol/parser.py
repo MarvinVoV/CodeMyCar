@@ -1,15 +1,5 @@
-import struct
 from enum import Enum, auto
-
-# 定义协议常量
-FRAME_HEADER = 0xAA55
-FRAME_TAIL = 0x55AA
-PROTOCOL_MAX_DATA_LEN = 512
-
-# 协议类型
-PROTOCOL_TYPE_SENSOR = 0x01
-PROTOCOL_TYPE_CONTROL = 0x02
-PROTOCOL_TYPE_LOG = 0x03
+from .common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN,ProtocolType
 
 
 # 状态机定义为枚举
@@ -88,27 +78,7 @@ class ProtocolParser:
         hex_data += f", CRC: {self.crc:04X}, Tail: {FRAME_TAIL:04X}"
         print(hex_data)
 
-    def print_plain_text(self):
-        """打印数据帧的 plain text 格式，空格间隔"""
-        data = self.frame['data']
-        print("Plain Text: " + data)
 
-    def print_log_data(self):
-        """打印日志内容"""
-        data = self.frame
-        if data["type"] == PROTOCOL_TYPE_LOG:
-            # 解析时间戳 (uint32_t)
-            timestamp = struct.unpack_from('<I', bytes(data["data"]), 0)[0]
-            # 解析模块标识 (uint16_t)
-            module = struct.unpack_from('<H', bytes(data["data"]), 4)[0]
-            # 解析日志级别 (uint8_t)
-            level = struct.unpack_from('<B', bytes(data["data"]), 6)[0]
-            # 解析日志正文 (固定长度字符串，128字节)
-            message = struct.unpack_from('<128s', bytes(data["data"]), 7)[0].rstrip(b'\x00').decode("utf-8")
-
-            print(f"Log data: timestamp={timestamp}, module={module}, level={level}, message={message}")
-        else:
-            print("Not a log frame")
 
 # # 示例使用
 # parser = ProtocolParser()

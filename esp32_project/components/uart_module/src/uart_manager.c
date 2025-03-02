@@ -25,8 +25,8 @@ static const char* TAG = "UARTManager";
 
 #define UART_RX_PIN GPIO_NUM_5
 #define UART_TX_PIN GPIO_NUM_4
-#define UART_RTS_PIN GPIO_NUM_6
-#define UART_CTS_PIN GPIO_NUM_7
+// #define UART_RTS_PIN GPIO_NUM_6
+// #define UART_CTS_PIN GPIO_NUM_7
 
 #define UART_PORT UART_NUM_1
 
@@ -58,8 +58,9 @@ void uart_init()
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_CTS_RTS, // 硬件流控制
-        .rx_flow_ctrl_thresh = 122, // RTS信号的触发阈值
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE // 明确禁用硬件流控
+        // .flow_ctrl = UART_HW_FLOWCTRL_CTS_RTS, // 硬件流控制
+        // .rx_flow_ctrl_thresh = 122, // RTS信号的触发阈值
     };
 
     // 安装UART驱动，启用DMA
@@ -80,8 +81,10 @@ void uart_init()
     // 初始化 UART 参数
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &uart_config));
     // 设置 UART 引脚
+    // ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_PIN, UART_RX_PIN,
+    //     UART_RTS_PIN, UART_CTS_PIN));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_PIN, UART_RX_PIN,
-        UART_RTS_PIN, UART_CTS_PIN));
+        UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     // 创建RAW DATA环形缓冲区
     raw_rb_handle = xRingbufferCreate(RING_BUFFER_SIZE, // 缓冲区大小

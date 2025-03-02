@@ -8,7 +8,6 @@
 #ifndef SYSTEM_PROTOCOL_INC_LOG_PROTOCOL_H_
 #define SYSTEM_PROTOCOL_INC_LOG_PROTOCOL_H_
 
-#include <stdarg.h>
 #include <stdint.h>
 #include <string.h>
 

@@ -13,14 +13,14 @@
 
 static osThreadId_t rawDataReadTaskHandle = NULL;
 // 累积缓冲区大小
-#define ACCUMULATE_BUF_SIZE ( 3 * 512)
+#define ACCUMULATE_BUF_SIZE ( 5 * PROTOCOL_MAX_DATA_LEN)
 
 // 协议解析处理器
 static protocol_receiver receiver;
 
 static void dispatcher(uint8_t type, const uint8_t* frame_data, uint16_t frame_len);
 
-static void process_raw_data(uint8_t* data, uint16_t len);
+static void process_raw_data(const uint8_t* raw_data, uint16_t len);
 
 /**
  * @brief 控制任务执行函数
@@ -41,11 +41,12 @@ void CtrlTask_Init()
         LOG_ERROR(LOG_MODULE_SYSTEM, "Create CtrlTask thread error.");
     }
 
-    // protocol_receiver_init(&receiver, ACCUMULATE_BUF_SIZE, dispatcher);
-    // if (receiver.buffer == NULL)
-    // {
-    //     // todo
-    // }
+    // 初始化协议接收器
+    protocol_receiver_init(&receiver, ACCUMULATE_BUF_SIZE, dispatcher);
+    if (receiver.buffer == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_SYSTEM, "Create protocol receiver error.");
+    }
 }
 
 static void CtrlTask_Execute(void* args)
@@ -60,6 +61,7 @@ static void CtrlTask_Execute(void* args)
                 const uint8_t inactive_buffer = uart_dma_buffer.current ^ 1;
                 uint8_t* data = uart_dma_buffer.buffer[inactive_buffer];
                 const uint16_t len = uart_dma_buffer.length;
+                if (len == 0) continue;
 
                 // 无效化 Cache（H7 的 Cache 行大小为 32 字节）
                 SCB_InvalidateDCache_by_Addr(data, len);
@@ -70,11 +72,24 @@ static void CtrlTask_Execute(void* args)
     }
 }
 
-static void dispatcher(uint8_t type, const uint8_t* frame_data, uint16_t frame_len)
+static void dispatcher(uint8_t type, const uint8_t* frame_data, const uint16_t frame_len)
 {
-    // todo
+    if (!validate_control_cmd(frame_data, frame_len))
+    {
+        LOG_ERROR(LOG_MODULE_SYSTEM, "ctrl_cmd_t validation failed");
+        return;
+    }
+    const control_cmd_t* cmd = (const control_cmd_t*)frame_data;
+
+    // Ping Test
+    if (cmd->ctrl_type == CTRL_TEXT)
+    {
+        LOG_INFO(LOG_MODULE_SYSTEM, "Receive debug %.*s\n", cmd->data.text.len, cmd->data.text.msg);
+    }
 }
 
-static void process_raw_data(uint8_t* data, uint16_t len)
+static void process_raw_data(const uint8_t* raw_data, const uint16_t len)
 {
+    // 通过累积缓冲区接收并解析数据，将解析的帧数据发送到消息队列
+    protocol_receiver_append(&receiver, raw_data, len);
 }
