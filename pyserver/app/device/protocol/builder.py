@@ -1,9 +1,7 @@
-import ctypes
 import struct
 from enum import IntEnum
 from typing import Union, Dict, Optional
-from typing import TYPE_CHECKING
-from .common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
+from common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
 
 
 # ---------- 基础类型定义 ----------

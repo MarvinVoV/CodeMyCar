@@ -1,8 +1,8 @@
 import struct
 import unittest
 
-from protocol import MotorCommandType, PROTOCOL_MAX_DATA_LEN, ProtocolType, ProtocolParser
-from protocol.builder import ProtocolFrameBuilder, DevicePayload
+from device.protocol import MotorCommandType, PROTOCOL_MAX_DATA_LEN, ProtocolType, ProtocolParser
+from device.protocol import ProtocolFrameBuilder, DevicePayload
 
 
 class TestProtocolFrame(unittest.TestCase):

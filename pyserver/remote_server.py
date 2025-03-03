@@ -1,7 +1,7 @@
 import paho.mqtt.client as mqtt
 import struct
 
-from protocol import DevicePayload, ProtocolFrameBuilder, ProtocolType, ProtocolParser
+from device.protocol import DevicePayload, ProtocolFrameBuilder, ProtocolType, ProtocolParser
 
 # Broker 配置
 BROKER_IP = "127.0.0.1"  # MQTT Broker 的 IP 地址，请确保这是正确的IP

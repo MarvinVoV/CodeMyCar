@@ -1,6 +1,6 @@
 import unittest
 
-from protocol import DevicePayload, MotorCommandType
+from device.protocol import DevicePayload, MotorCommandType
 
 
 class TestDevicePayload(unittest.TestCase):

@@ -1,5 +1,6 @@
 from enum import Enum, auto
-from .common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN,ProtocolType
+
+from common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
 
 
 # 状态机定义为枚举
@@ -77,8 +78,6 @@ class ProtocolParser:
         hex_data += "Data: " + " ".join(f"{byte:02X}" for byte in data["data"])
         hex_data += f", CRC: {self.crc:04X}, Tail: {FRAME_TAIL:04X}"
         print(hex_data)
-
-
 
 # # 示例使用
 # parser = ProtocolParser()
