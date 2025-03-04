@@ -22,7 +22,6 @@ class SubscriptionManager:
             del self._handlers[topic_pattern]
             logger.info(f"Unsubscribed {topic_pattern}")
 
-# 初始化（在main.py中）
 def init_subscriptions(app):
     """带安全检查的订阅初始化"""
     if not hasattr(app.state, "mqtt_client"):

@@ -1,79 +1,119 @@
-import sys
+import datetime
+import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import structlog
 from structlog.types import Processor
+from structlog.stdlib import ProcessorFormatter, BoundLogger
+from logging.handlers import RotatingFileHandler
 
 from app.config.settings import Settings
 
 
 def setup_logging(settings: Settings):
-    """纯 structlog 日志配置"""
+    """配置 structlog 和标准库 logging，满足不同环境和设备日志需求。"""
     # 创建日志目录
-    if settings.LOG_FILE_PATH:
-        log_path = Path(settings.LOG_FILE_PATH)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_dir = Path(settings.LOG_FILE_PATH).parent if settings.LOG_FILE_PATH else Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
 
-    # 统一处理器配置
-    processors: list[Processor] = [
+    # structlog 处理器链
+    processors: List[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.filter_by_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
+        add_custom_timestamp,
         structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
     ]
 
-    # 开发环境配置
-    if settings.ENV == "dev":
-        processors.append(_get_console_renderer())
-    else:
-        processors.extend([
-            structlog.processors.dict_tracebacks,
-            structlog.processors.JSONRenderer()
-        ])
-
-    # 生产环境文件输出
-    if settings.LOG_FILE_PATH and settings.ENV != "dev":
-        file_processor = structlog.WriteFiles(
-            path=settings.LOG_FILE_PATH,
-            rotate=settings.LOG_MAX_SIZE,
-            max_files=settings.LOG_BACKUP_COUNT
-        )
-        processors.append(file_processor)
-
-    # 最终配置
+    # 配置 structlog
     structlog.configure(
         processors=processors,
-        wrapper_class=structlog.make_filtering_bound_logger(
-            # 将日志级别字符串转换为对应的数值
-            _get_structlog_level(settings.LOG_LEVEL)
-        ),
-        context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
     )
 
+    # 配置标准库 logging 的处理器和日志器
+    handlers = []
 
-def _get_structlog_level(level_str: str) -> int:
-    """将日志级别字符串转换为structlog级别数值"""
-    level_map = {
-        "debug": 10,
-        "info": 20,
-        "warning": 30,
-        "error": 40,
-        "critical": 50
-    }
-    return level_map.get(level_str.lower(), 20)  # 默认info级别
+    if settings.ENV == "dev":
+        # 开发环境：所有日志输出到控制台
+        console_handler = logging.StreamHandler()
+        console_formatter = ProcessorFormatter(
+            processor=_get_console_renderer(),
+            foreign_pre_chain=processors[:-1],
+        )
+        console_handler.setFormatter(console_formatter)
+        handlers.append(console_handler)
+    else:
+        # 生产环境：应用主日志和设备日志输出到文件
+        # 应用主日志文件处理器
+        app_handler = RotatingFileHandler(
+            filename=log_dir / "app.log",
+            maxBytes=settings.LOG_MAX_SIZE,
+            backupCount=settings.LOG_BACKUP_COUNT,
+        )
+        app_formatter = ProcessorFormatter(
+            processor=structlog.processors.JSONRenderer(),
+            foreign_pre_chain=processors[:-1],
+        )
+        app_handler.setFormatter(app_formatter)
+        handlers.append(app_handler)
+
+        # 设备日志文件处理器
+        devices = ["stm32", "esp32"]
+        for device in devices:
+            handler = RotatingFileHandler(
+                filename=log_dir / f"{device}.log",
+                maxBytes=settings.LOG_MAX_SIZE,
+                backupCount=settings.LOG_BACKUP_COUNT,
+            )
+            formatter = ProcessorFormatter(
+                processor=structlog.processors.JSONRenderer(),
+                foreign_pre_chain=processors[:-1],
+            )
+            handler.setFormatter(formatter)
+            # 创建设备专用的日志器并添加处理器
+            device_logger = logging.getLogger(f"device.{device}")
+            device_logger.addHandler(handler)
+            device_logger.setLevel(settings.LOG_LEVEL.upper())
+            device_logger.propagate = False  # 阻止传播到根日志器
+
+    # 配置根日志器
+    root_logger = logging.getLogger()
+    root_logger.handlers = handlers
+    root_logger.setLevel(settings.LOG_LEVEL.upper())
+
+
+def add_custom_timestamp(logger, method_name, event_dict):
+    """添加自定义时间戳，精确到毫秒。"""
+    now = datetime.datetime.now()
+    event_dict['timestamp'] = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    return event_dict
 
 
 def _get_console_renderer() -> structlog.dev.ConsoleRenderer:
-    """控制台渲染器（移除 colorama 依赖）"""
+    """控制台渲染器（无颜色依赖）。"""
     return structlog.dev.ConsoleRenderer(
-        colors=sys.stdout.isatty()  # 自动检测终端颜色支持
+        pad_event=30,
+        colors=True,
+        exception_formatter=structlog.dev.plain_traceback
     )
 
 
-def get_logger(name: Optional[str] = None) -> structlog.stdlib.BoundLogger:
-    """获取日志记录器"""
+def get_logger(name: Optional[str] = None) -> BoundLogger:
+    """获取 structlog 日志器。"""
     return structlog.get_logger(name or __name__)
+
+
+def get_stm32_logger() -> BoundLogger:
+    """获取 stm32 设备专用的 structlog 日志器。"""
+    return structlog.get_logger("device.stm32")
+
+
+def get_esp32_logger() -> BoundLogger:
+    """获取 esp32 设备专用的 structlog 日志器。"""
+    return structlog.get_logger("device.esp32")

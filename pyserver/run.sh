@@ -20,6 +20,14 @@ start_mosquitto() {
     fi
 }
 
+stop_mosquitto() {
+    if [ -f "${CONFIG_DIR}"/mosquitto.pid ]; then
+        MOSQUITTO_PID=$(cat "${CONFIG_DIR}"/mosquitto.pid)
+        kill -9 "${MOSQUITTO_PID}" 2>/dev/null && echo "Stopped Mosquitto (PID: ${MOSQUITTO_PID})" || echo "Mosquitto process not found"
+        rm "${CONFIG_DIR}"/mosquitto.pid
+   fi
+}
+
 start_app() {
     if ! lsof -i :${APP_PORT} | grep LISTEN; then
         echo "Starting FastAPI service..."
@@ -28,6 +36,14 @@ start_app() {
         echo "API started (PID: $(cat "${CONFIG_DIR}"/app.pid))"
     else
         echo "FastAPI already running on port ${APP_PORT}"
+    fi
+}
+
+stop_app() {
+    if [ -f "${CONFIG_DIR}"/app.pid ]; then
+        APP_PID=$(cat "${CONFIG_DIR}"/app.pid)
+        kill -9 "${APP_PID}" 2>/dev/null && echo "Stopped API (PID: ${APP_PID})" || echo "API process not found"
+        rm "${CONFIG_DIR}"/app.pid
     fi
 }
 
@@ -47,18 +63,10 @@ start_services() {
 stop_services() {
     echo "Stopping services..."
     # 停止Mosquitto
-    if [ -f "${CONFIG_DIR}"/mosquitto.pid ]; then
-        MOSQUITTO_PID=$(cat "${CONFIG_DIR}"/mosquitto.pid)
-        kill -9 "${MOSQUITTO_PID}" 2>/dev/null && echo "Stopped Mosquitto (PID: ${MOSQUITTO_PID})" || echo "Mosquitto process not found"
-        rm "${CONFIG_DIR}"/mosquitto.pid
-    fi
+    stop_mosquitto
 
     # 停止FastAPI
-    if [ -f "${CONFIG_DIR}"/app.pid ]; then
-        APP_PID=$(cat "${CONFIG_DIR}"/app.pid)
-        kill -9 "${APP_PID}" 2>/dev/null && echo "Stopped API (PID: ${APP_PID})" || echo "API process not found"
-        rm "${CONFIG_DIR}"/app.pid
-    fi
+    stop_app
 }
 
 # 3. 帮助信息
@@ -67,6 +75,8 @@ show_help() {
     echo "  start   - 启动所有服务"
     echo "  stop    - 停止所有服务"
     echo "  restart - 重启所有服务"
+    echo "  start_mqtt   - 启动Mosquitto服务"
+    echo "  stop_mqtt    - 停止Mosquitto服务"
 }
 
 # 主流程
@@ -81,6 +91,12 @@ case "$1" in
         stop_services
         sleep 2
         start_services
+        ;;
+    start_mqtt)
+        start_mosquitto
+        ;;
+    stop_mqtt)
+        stop_mosquitto
         ;;
     *)
         show_help

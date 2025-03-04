@@ -1,11 +1,5 @@
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
-class ErrorResponse(BaseModel):
-    code: int
-    message: str
-    detail: str | None = None
 
 class CustomHTTPException(HTTPException):
     def __init__(self, status_code: int, code: int, message: str, detail: str = None):

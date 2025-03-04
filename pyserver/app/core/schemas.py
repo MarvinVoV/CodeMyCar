@@ -3,15 +3,6 @@ from datetime import datetime
 from typing import Optional, Dict
 
 
-class DeviceCommand(BaseModel):
-    """设备指令基础模型"""
-    command: str = Field(..., min_length=1, json_schema_extra={"examples": ["reboot"]})
-    params: Optional[Dict] = Field(
-        default=None,
-        json_schema_extra={"delay": 5, "force": True}
-    )
-
-
 class HealthCheckResponse(BaseModel):
     """健康检查响应模型"""
     status: str = Field(..., json_schema_extra={"examples": ["ok"]})
