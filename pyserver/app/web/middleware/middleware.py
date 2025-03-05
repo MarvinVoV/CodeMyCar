@@ -2,9 +2,9 @@ import time
 
 from fastapi import Request, Response
 from app.core.logger import get_logger
-from app.core.exceptions import CustomHTTPException
+from core.exception.exceptions import CustomHTTPException
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 def register_middlewares(app):
@@ -19,7 +19,7 @@ def register_middlewares(app):
         try:
             # 前置处理
             logger.info(
-                "Request started",
+                "[Request] ",
                 path=request.url.path,
                 method=request.method
             )

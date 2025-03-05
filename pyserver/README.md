@@ -31,3 +31,13 @@ deactivate
 ```shell
 /opt/homebrew/opt/mosquitto/sbin/mosquitto -c /opt/homebrew/etc/mosquitto/mosquitto.conf
 ```
+
+## mqtt topic
+
+[前缀]/[设备类型]/[设备ID]/[数据类型]
+
+1. 设备命令下发（设备订阅）
+   cmd/[device_type]/[device_id]/exec
+2. 设备数据上报（服务端订阅）
+   data/[device_type]/[device_id]/sensor
+   data/+/+/heartbeat

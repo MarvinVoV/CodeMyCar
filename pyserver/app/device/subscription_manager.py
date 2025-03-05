@@ -28,5 +28,8 @@ def init_subscriptions(app):
         raise RuntimeError("MQTT client not initialized")
 
     mgr = SubscriptionManager(app.state.mqtt_client)
-    mgr.register("devices/+/status", handle_device_status)
+    # 设备数据上报 data/[device_type]/[device_id]/sensor
+    mgr.register("data/+/+/sensor", handle_device_status)
+    mgr.register("data/+/+/heartbeat", handle_device_status)
+
     app.state.subscription_mgr = mgr

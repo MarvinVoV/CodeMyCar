@@ -4,7 +4,7 @@ from app.core.schemas import (
     HealthCheckResponse,
     SystemConfigResponse
 )
-from app.core.exceptions import CustomHTTPException
+from core.exception.exceptions import CustomHTTPException
 from app.config.settings import get_settings
 
 router = APIRouter(prefix="/system", tags=["System"])

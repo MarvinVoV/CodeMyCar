@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.core.models.api_model import BaseResponse
 
@@ -42,7 +42,7 @@ class CommandType(str, Enum):
 class DeviceCommand(BaseModel):
     """设备指令模型（v2 语法）"""
     command_type: CommandType
-    payload: Union[ServoCommand, dict] = Field(
+    payload: Union[ServoCommand, PingCommand, dict] = Field(
         ...,
         json_schema_extra={
             "examples": [

@@ -2,10 +2,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.web.middleware.middleware import register_middlewares
 from app.config import get_settings
-from app.core.exceptions import register_exceptions
+from core.exception.exceptions import register_exceptions
 from app.core.logger import setup_logging
-from app.device.mqtt_client import MQTTClientWrapper, get_mqtt_client
+from app.device.mqtt_client import MQTTClientWrapper
 from app.device.subscription_manager import init_subscriptions
 from app.web.api.v1 import devices, system
 
@@ -25,7 +26,7 @@ async def enhanced_lifespan(app: FastAPI):
         await mqtt_client.connect()
 
         # 挂载到应用状态
-        app.state.mqtt_client = mqtt_client # type:ignore
+        app.state.mqtt_client = mqtt_client  # type:ignore
 
         # 配置消息订阅
         init_subscriptions(app)
@@ -50,13 +51,18 @@ async def safe_shutdown(client: MQTTClientWrapper):
         print(f"Shutdown error: {str(e)}")
 
 
+
 app: FastAPI = FastAPI(lifespan=enhanced_lifespan, title="IoT Service Platform")
 
+# 注册异常处理
 register_exceptions(app)
 
 # 挂载路由
 app.include_router(devices.router)
 app.include_router(system.router)
+
+# 注册中间件
+register_middlewares(app)
 
 
 @app.get("/")

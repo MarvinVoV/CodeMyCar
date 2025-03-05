@@ -1,7 +1,11 @@
 import struct
 from enum import IntEnum
 from typing import Union, Dict, Optional
-from common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
+
+from app.device.protocol.common import PROTOCOL_MAX_DATA_LEN, FRAME_HEADER, FRAME_TAIL
+
+
+# from common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
 
 
 # ---------- 基础类型定义 ----------

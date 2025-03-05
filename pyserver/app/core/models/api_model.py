@@ -1,32 +1,10 @@
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field, ConfigDict
 
 
 class BaseRequest(BaseModel):
-    """基础请求模型（Pydantic v2 语法）"""
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [{
-                "request_id": "req_123456",
-                "timestamp": 1691234567.890
-            }]
-        }
-    )
-
-    request_id: str = Field(
-        ...,
-        min_length=8,
-        max_length=32,
-        json_schema_extra={"examples": ["req_123456"]},
-        description="唯一请求标识"
-    )
-    timestamp: float = Field(
-        default_factory=lambda: datetime.now().timestamp(),
-        json_schema_extra={"examples": [1691234567.890]},
-        description="客户端时间戳"
-    )
+    pass
 
 
 class BaseResponse(BaseRequest):
@@ -60,3 +38,8 @@ class ErrorResponse(BaseResponse):
     """错误响应模型"""
     error_code: str
     error_detail: Optional[dict] = None
+
+
+class CommandResponse(BaseResponse):
+    """响应模型"""
+    data: Optional[dict] = None

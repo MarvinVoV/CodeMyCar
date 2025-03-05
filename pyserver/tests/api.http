@@ -1,0 +1,19 @@
+### GET /
+GET http://localhost:8000
+Accept: application/json
+
+### GET /api/v1/devices/status/DEV1
+GET http://localhost:8000/api/v1/devices/status/DEV1?request_id=1234567890
+Accept: application/json
+
+### POST /api/v1/devices/DEV1/commands
+POST http://localhost:8000/api/v1/devices/DEV1/commands
+Accept: application/json
+Content-Type: application/json
+
+{
+  "command_type": "servo",
+  "payload": {
+    "angle": 60.0
+  }
+}
