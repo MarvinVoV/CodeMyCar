@@ -1,6 +1,7 @@
 #include "log_manager.h"
 
 #include <stdio.h>
+#include <stdarg.h>
 
 #include "cmsis_os2.h"
 #include "log_task.h"
@@ -15,7 +16,6 @@ static log_output_channel* channels[LOG_MAX_CHANNELS] = {NULL};
 
 
 static void log_dispatch_entry(log_entry_t* entry);
-static void sent_log_to_queue(const log_entry_t* entry);
 
 void LogManager_AddOutputChannel(log_output_channel* channel)
 {
@@ -38,8 +38,8 @@ void LogManager_Init(void)
         /* 处理错误 */
     }
 
-    // 创建消息队列：10个消息，每个消息大小为日志结构体
-    log_queue = osMessageQueueNew(LOG_QUEUE_SIZE, sizeof(log_entry_t), NULL);
+    // 创建消息队列：10个消息，每个消息大小为日志结构体的指针
+    log_queue = osMessageQueueNew(LOG_QUEUE_SIZE, sizeof(log_entry_t*), NULL);
     if (log_queue == NULL)
     {
         /* 处理错误 */
@@ -112,6 +112,7 @@ void log_record(const log_level_t level, const log_module_t module, const char* 
 
 static void log_dispatch_entry(log_entry_t* entry)
 {
+    bool entry_queued = false;
     for (int i = 0; i < LOG_MAX_CHANNELS; i++)
     {
         if (channels[i] != NULL && (channels[i]->level_filter & entry->level) &&
@@ -119,28 +120,30 @@ static void log_dispatch_entry(log_entry_t* entry)
         {
             if (channels[i]->direct_output)
             {
-            if (channels[i]->huart != NULL)
-            {
-                // 日志处理
-                LOG_DEBUG_UART(channels[i]->huart, "%s\n", entry->message);
-            }
-                // 释放内存块
-                osMemoryPoolFree(log_pool, entry);
+                if (channels[i]->huart != NULL)
+                {
+                    // 日志处理
+                    LOG_DEBUG_UART(channels[i]->huart, "%s\n", entry->message);
+                }
             }
             else
             {
-                sent_log_to_queue(entry);
+                const osStatus_t status = osMessageQueuePut(log_queue, &entry, osPriorityNone, osWaitForever);
+                // 处理队列满的情况（可选策略）
+                if (status == osOK)
+                {
+                    entry_queued = true;
+                }
+                else
+                {
+                    /*错误日志处理*/
+                }
             }
         }
     }
-}
-
-static void sent_log_to_queue(const log_entry_t* entry)
-{
-    const osStatus_t status = osMessageQueuePut(log_queue, entry, osPriorityNone, 0);
-    // 处理队列满的情况（可选策略）
-    if (status == osErrorResource)
+    // 若未入队（例如仅有直接通道），立即释放
+    if (!entry_queued)
     {
-        /*错误日志处理*/
+        osMemoryPoolFree(log_pool, entry);
     }
 }

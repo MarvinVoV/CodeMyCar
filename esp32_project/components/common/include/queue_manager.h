@@ -6,10 +6,11 @@ typedef enum { UART = 0, MQTT, LOG, QUEUE_TYPE_MAX } QueueType_t;
 
 typedef struct
 {
-    QueueType_t type; // 队列类型
-    void* data; // 数据指针
-    size_t len; // 数据长度
-    void* extra_info; // 扩展信息
+    QueueType_t type;      // 队列类型
+    uint8_t protocol_type; // 协议类型
+    void* data;            // 数据指针
+    size_t len;            // 数据长度
+    void* extra_info;      // 扩展信息
 } QueueMessage_t;
 
 /**

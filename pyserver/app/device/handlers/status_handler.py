@@ -1,14 +1,8 @@
+from paho.mqtt.client import topic_matches_sub
+
 from app.core.logger import get_logger
+from core.models.command import DeviceCommand
+from device.protocol.builder import DevicePayload
 
-logger = get_logger("handler.status")
-
-
-async def handle_device_status(data: dict):
-    """处理设备状态上报"""
-    try:
-        device_id = data["device_id"]
-        # TODO
-        logger.info(f"Updated {device_id} status")
-
-    except KeyError as e:
-        logger.error(f"Missing field in status data: {str(e)}")
+async def handle_device_heartbeat(self, data: dict):
+    pass

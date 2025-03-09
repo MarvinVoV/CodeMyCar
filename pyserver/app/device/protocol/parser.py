@@ -1,6 +1,6 @@
 from enum import Enum, auto
 
-from common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
+from app.device.protocol.common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
 
 
 # 状态机定义为枚举

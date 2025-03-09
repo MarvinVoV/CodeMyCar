@@ -13,6 +13,8 @@
 
 #include "pkt_protocol.h"
 
+#define MAX_LOG_LEN (PROTOCOL_MAX_DATA_LEN - 8)
+
 // 日志级别定义（按bit位设计，支持组合过滤）
 typedef enum
 {
@@ -41,12 +43,10 @@ typedef struct
     uint32_t timestamp;                  // 时间戳（单位ms）
     uint16_t module;                     // 模块标识（log_module_t）
     uint8_t level;                       // 日志级别（log_level_t）
-    char message[PROTOCOL_MAX_DATA_LEN]; // 日志正文
+    char message[MAX_LOG_LEN]; // 日志正文
 } log_entry_t;
 #pragma pack(pop)
 
-// 日志协议控制参数
-#define LOG_MAX_LENGTH PROTOCOL_MAX_DATA_LEN
 #define LOG_QUEUE_SIZE 16                 // 日志队列缓冲数量
 #define LOG_TIMESTAMP_BASE HAL_GetTick()  // 时间戳基准
 

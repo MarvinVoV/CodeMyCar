@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 #include "mqtt_client.h"
 #include "mqtt_topic.h"
+#include "mqtt_utils.h"
 #include "queue_manager.h"
 #include "task_priorities.h"
 #include "pkt_protocol_buf.h"
@@ -265,19 +266,18 @@ esp_err_t mqtt_subscribe(const char* topic, int qos)
 
 static void process_mqtt_message(const mqtt_msg_t* msg)
 {
-    ESP_LOGI(TAG, "Processing MQTT message: %.*s, topic=%.*s", msg->length,
-             msg->payload, strlen(msg->topic), msg->topic);
+    // ESP_LOGI(TAG, "Processing MQTT message: %.*s, topic=%.*s", msg->length,
+    //          msg->payload, strlen(msg->topic), msg->topic);
 
     // 处理MQTT消息
     if (msg->topic && msg->payload)
     {
         // 下行 Topic
-        if (strcmp(msg->topic, TOPIC_SERVER_CTRL) == 0)
+        if (mqtt_topic_match(TOPIC_SERVER_CTRL, msg->topic))
         {
             // 处理控制消息:发送UART数据
             handle_command_message(msg);
-        }
-        else
+        } else
         {
             // 处理通用消息
             handle_common_message(msg);
@@ -409,9 +409,13 @@ void handle_uart_message_task(void* pvParameters)
             free_queue_message(&uart_msg);
             continue;
         }
-        // 上行 TOPIC
-        const esp_err_t err = mqtt_publish(TOPIC_DEVICE_SENSOR, uart_msg.data,
-                                           uart_msg.len, 0);
+        ESP_LOGI(TAG, "Received message from UART protocol_type=%d", uart_msg.protocol_type);
+        // 上行 TOPIC 根据协议类型，发送不同的 topic
+        const uint8_t protocol_type = uart_msg.protocol_type;
+        const char* topic = protocol_type == PROTOCOL_TYPE_LOG
+                               ? TOPIC_STM32_LOG
+                               : TOPIC_STM32_SENSOR;
+        const esp_err_t err = mqtt_publish(topic, uart_msg.data, uart_msg.len, 0);
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to publish uart data to MQTT");

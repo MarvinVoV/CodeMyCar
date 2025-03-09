@@ -397,7 +397,8 @@ static void send_frame_to_mqtt_queue(const uint8_t type, const uint8_t* frame_da
         return;
     }
     const QueueMessage_t msg = {
-        .type = type,
+        .type = UART,
+        .protocol_type = type,
         .data = malloc(frame_len),
         .len = frame_len,
     };

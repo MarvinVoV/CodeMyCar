@@ -35,7 +35,7 @@ static void log_task(void* pvParameters)
         QueueMessage_t item;
         if (xQueueReceive(log_queue, &item, portMAX_DELAY) == pdTRUE)
         {
-            if (mqtt_publish(TOPIC_DEBUG_LOG, item.data, item.len, 0) != ESP_OK)
+            if (mqtt_publish(TOPIC_ESP32_LOG, item.data, item.len, 0) != ESP_OK)
             {
                 ESP_LOGE(TAG, "Failed to publish log message");
             }

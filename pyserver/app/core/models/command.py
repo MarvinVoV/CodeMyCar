@@ -9,18 +9,14 @@ from app.core.models.api_model import BaseResponse
 
 class ServoCommand(BaseModel):
     """舵机控制指令参数模型"""
-    angle: float = Field(
+    angle: int = Field(
         ...,
         ge=0,
         le=180,
-        json_schema_extra={"examples": [90.5]},
+        json_schema_extra={"examples": [90]},
         description="舵机转动角度（0-180度）"
     )
 
-    @classmethod
-    def round_angle(cls, v: float) -> float:
-        """角度精度处理"""
-        return round(v, 1)
 
 
 class PingCommand(BaseModel):
@@ -46,7 +42,7 @@ class DeviceCommand(BaseModel):
         ...,
         json_schema_extra={
             "examples": [
-                {"angle": 90.5},  # SERVO 示例
+                {"angle": 90},  # SERVO 示例
                 {"test_mode": "quick"}  # CONTROL 示例
             ]
         },
@@ -57,7 +53,7 @@ class DeviceCommand(BaseModel):
         json_schema_extra={
             "examples": [{
                 "command_type": "servo",
-                "payload": {"angle": 45.0}
+                "payload": {"angle": 45}
             }]
         }
     )

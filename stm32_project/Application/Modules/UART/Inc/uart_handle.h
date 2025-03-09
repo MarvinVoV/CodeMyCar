@@ -20,6 +20,7 @@
 
 // 定义UART缓冲区大小
 #define UART_RX_BUFFER_SIZE (PROTOCOL_MAX_DATA_LEN * 4)
+#define UART_TX_BUFFER_SIZE (PROTOCOL_MAX_DATA_LEN * 4)
 
 
 typedef struct
@@ -31,7 +32,8 @@ typedef struct
 
 typedef struct
 {
-    uint8_t buffer[2][UART_RX_BUFFER_SIZE] __ALIGNED(32);
+    uint8_t rx_buffer[2][UART_RX_BUFFER_SIZE] __ALIGNED(32);
+    uint8_t tx_buffer[UART_TX_BUFFER_SIZE] __ALIGNED(32);
     volatile uint8_t current;    // 当前接收缓冲区索引
     volatile uint16_t length;    // 有效数据长度
     SemaphoreHandle_t semaphore; // 二值信号量

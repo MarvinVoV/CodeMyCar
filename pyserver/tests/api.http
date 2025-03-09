@@ -14,6 +14,18 @@ Content-Type: application/json
 {
   "command_type": "servo",
   "payload": {
-    "angle": 60.0
+    "angle": 60
+  }
+}
+
+### POST /api/v1/devices/DEV1/commands
+POST http://localhost:8000/api/v1/devices/DEV1/commands
+Accept: application/json
+Content-Type: application/json
+
+{
+  "command_type": "ping",
+  "payload": {
+    "echo_message": "hello world"
   }
 }

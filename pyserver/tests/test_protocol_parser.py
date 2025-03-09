@@ -1,8 +1,9 @@
 import struct
 import unittest
 
-from device.protocol import MotorCommandType, PROTOCOL_MAX_DATA_LEN, ProtocolType, ProtocolParser
-from device.protocol import ProtocolFrameBuilder, DevicePayload
+from app.device.protocol.builder import DevicePayload, ProtocolFrameBuilder, MotorCommandType
+from app.device.protocol.common import ProtocolType, PROTOCOL_MAX_DATA_LEN
+from app.device.protocol.parser import ProtocolParser
 
 
 class TestProtocolFrame(unittest.TestCase):
@@ -14,24 +15,20 @@ class TestProtocolFrame(unittest.TestCase):
     def test_frame_integrity(self):
         """测试完整帧构建与解析流程"""
         # 构建测试载荷
-        payload = DevicePayload().build_motor(
-            cmd_type=MotorCommandType.TURN_LEFT,
-            left=200,
-            right=180,
-            acc=80
-        )
+        payload = DevicePayload().build_text("helloworld")
 
         # 构建协议帧
         builder = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value)
         frame = builder.set_payload(payload).build_frame()
 
+        print("\n")
         print(" ".join("{:02x}".format(x) for x in frame))
         # 解析协议帧
         parsed = ProtocolFrameBuilder.parse_frame(frame)
 
         # 验证元数据
         self.assertEqual(parsed["protocol_type"], ProtocolType.CONTROL.value)
-        self.assertEqual(len(parsed["payload"]), 6)
+        self.assertEqual(len(parsed["payload"]), 10)
 
         # # 验证载荷一致性
         # reconstructed = DevicePayload.from_bytes(parsed["payload"])

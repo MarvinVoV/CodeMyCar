@@ -59,7 +59,7 @@ static void CtrlTask_Execute(void* args)
             {
                 // 获取非活动缓冲区的索引和长度
                 const uint8_t inactive_buffer = uart_dma_buffer.current ^ 1;
-                uint8_t* data = uart_dma_buffer.buffer[inactive_buffer];
+                uint8_t* data = uart_dma_buffer.rx_buffer[inactive_buffer];
                 const uint16_t len = uart_dma_buffer.length;
                 if (len == 0) continue;
 

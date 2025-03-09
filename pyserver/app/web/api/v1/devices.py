@@ -11,7 +11,7 @@ from app.core.services.device_comm import DeviceCommunicationService
 from app.core.exception.errorcode import ErrorCode
 from app.core.exception.exceptions import AppException
 
-logger = get_logger("api.devices")
+logger = get_logger()
 
 router = APIRouter(prefix="/api/v1/devices", tags=["Devices"])
 
@@ -46,7 +46,7 @@ async def send_device_command(
             device_id=device_id,
             command=command,
         )
-        return CommandResponse(data=result)
+        return result
 
     except AppException as e:
         logger.error("send command error", error=str(e))

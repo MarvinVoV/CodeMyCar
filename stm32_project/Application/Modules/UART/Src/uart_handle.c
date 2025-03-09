@@ -40,7 +40,7 @@ void start_reception()
     uart_dma_buffer.current = next_buffer;
 
     // 启动DMA接收，交替使用缓冲区
-    HAL_StatusTypeDef status = HAL_UARTEx_ReceiveToIdle_DMA(&huart4, uart_dma_buffer.buffer[next_buffer],
+    HAL_StatusTypeDef status = HAL_UARTEx_ReceiveToIdle_DMA(&huart4, uart_dma_buffer.rx_buffer[next_buffer],
                                                             UART_RX_BUFFER_SIZE);
     if (status != HAL_OK)
     {
@@ -130,15 +130,15 @@ static bool UART_Send_To_Esp(const uint8_t* data, const uint16_t length, const p
     uint16_t frame_len = 0;
     uint8_t* packed_frame = protocol_pack_frame(type, data, length, &frame_len);
 
-    if (packed_frame != NULL && frame_len > 0)
+    if (packed_frame != NULL && frame_len > 0 && frame_len <= UART_TX_BUFFER_SIZE)
     {
+        // 复制到静态缓冲区
+        memcpy(uart_dma_buffer.tx_buffer, packed_frame, frame_len);
+        free(packed_frame);  // 立即释放动态内存
+
         const HAL_StatusTypeDef status =
-            HAL_UART_Transmit_DMA(&huart4, packed_frame, frame_len);
-        if (status == HAL_OK)
-        {
-            free(packed_frame);
-            return true;
-        }
+            HAL_UART_Transmit_DMA(&huart4, uart_dma_buffer.tx_buffer, frame_len);
+        return status == HAL_OK;
     }
     if (packed_frame != NULL)
     {

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     MQTT_PORT: int = 1883
     MQTT_KEEPALIVE: int = 60
     MQTT_CLIENT_ID: str = "pyserver"
+    MQTT_CONNECT_TIMEOUT: int = 10
 
     # 日志配置
     LOG_LEVEL: str = "INFO"

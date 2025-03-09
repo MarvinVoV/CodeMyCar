@@ -34,7 +34,7 @@ bool queue_manager_init(const QueueType_t queue_type)
             {
                 return mqtt_data_queue;
             }
-        // 创建MQTT发送队列
+            // 创建MQTT发送队列
             mqtt_data_queue = xQueueCreate(MQTT_QUEUE_LENGTH, QUEUE_ITEM_SIZE);
             if (!mqtt_data_queue)
             {

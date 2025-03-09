@@ -1,6 +1,7 @@
+import json
 import struct
 from enum import IntEnum
-from typing import Union, Dict, Optional
+from typing import Union, Dict, Optional, NamedTuple
 
 from app.device.protocol.common import PROTOCOL_MAX_DATA_LEN, FRAME_HEADER, FRAME_TAIL
 
@@ -275,3 +276,74 @@ class ProtocolFrameBuilder:
             "payload": payload_data,
             "raw_frame": frame
         }
+
+
+# ---------- STM32 LOG PAYLOAD --------------------
+class LogEntry(NamedTuple):
+    timestamp: int  # 时间戳（单位ms）
+    module: int  # 模块标识
+    level: int  # 日志级别
+    message: str  # 日志正文
+
+    def to_json(self, ensure_ascii: bool = False, indent: int = None) -> str:
+        """
+        将日志条目序列化为JSON字符串
+        :param ensure_ascii: 是否转义非ASCII字符（默认False保留中文）
+        :param indent: JSON缩进格式（默认紧凑格式）
+        :return: JSON格式字符串
+        """
+        return json.dumps(
+            {
+                "timestamp": self.timestamp,
+                "module": self.module,
+                "level": self.level,
+                "message": self.message.strip()
+            },
+            ensure_ascii=ensure_ascii,
+            indent=indent
+        )
+
+
+class LogParser:
+    """UART日志协议解析器"""
+
+    # 协议固定参数（与 C 的 MAX_LOG_LEN 保持一致）
+    MAX_LOG_LEN = 100      # 消息字段固定长度
+    STRUCT_FORMAT = "<IHB100s"  # 格式：小端, uint32, uint16, uint8, 100字节数组
+    EXPECTED_SIZE = struct.calcsize(STRUCT_FORMAT)  # 4+2+1+100=107 字节
+
+    def __init__(self):
+        self._struct = struct.Struct(self.STRUCT_FORMAT)
+
+    def parse(self, data: bytes) -> LogEntry:
+        """解析二进制数据"""
+        # 严格校验数据长度
+        if len(data) != self.EXPECTED_SIZE:
+            raise ValueError(
+                f"Invalid data length: expected {self.EXPECTED_SIZE}, got {len(data)}"
+            )
+
+        # 解包数据（自动处理小端字节序）
+        timestamp, module, level, raw_msg = self._struct.unpack(data)
+
+        # 提取有效消息内容（截断到第一个空字符）
+        message = self._trim_null_bytes(raw_msg)
+
+        return LogEntry(
+            timestamp=timestamp,
+            module=module,
+            level=level,
+            message=message
+        )
+
+    def _trim_null_bytes(self, raw: bytes) -> str:
+        """处理消息字段：截断到第一个空字符，并解码为字符串"""
+        null_pos = raw.find(b'\x00')
+        if null_pos != -1:
+            raw = raw[:null_pos]
+        return raw.decode('utf-8', errors='replace')
+
+    @property
+    def expected_size(self) -> int:
+        """返回协议规定的数据包大小"""
+        return self.EXPECTED_SIZE
