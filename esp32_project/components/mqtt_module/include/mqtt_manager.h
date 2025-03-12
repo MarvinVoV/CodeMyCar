@@ -10,16 +10,16 @@ extern "C" {
 // MQTT消息结构
 typedef struct
 {
-    char* topic; // topic name
+    char* topic;      // topic name
     uint8_t* payload; // message data
-    size_t length; // message data length
+    size_t length;    // message data length
 } mqtt_msg_t;
 
 // MQTT配置参数
 typedef struct
 {
     const char* broker_url; // MQTT broker URL
-    const char* client_id; // MQTT client ID
+    const char* client_id;  // MQTT client ID
 } mqtt_config_t;
 
 /**

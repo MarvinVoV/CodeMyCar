@@ -135,8 +135,8 @@ int protocol_parse_byte(protocol_parser_t* parser, uint8_t byte)
                 header_part[0] =
                     (uint8_t)(parser->frame.header & 0xFF); // Header低字节
                 header_part[1] =
-                    (uint8_t)((parser->frame.header >> 8) & 0xFF); // Header高字节
-                header_part[2] = parser->frame.type; // 类型
+                    (uint8_t)((parser->frame.header >> 8) & 0xFF);    // Header高字节
+                header_part[2] = parser->frame.type;                  // 类型
                 header_part[3] = (uint8_t)(parser->frame.len & 0xFF); // 长度低字节
                 header_part[4] =
                     (uint8_t)((parser->frame.len >> 8) & 0xFF); // 长度高字节
@@ -251,7 +251,7 @@ size_t buffer_to_hex(const uint8_t* src_buffer, const size_t src_len,
     {
         // 格式化为两位十六进制数，并添加空格
         const int bytes_needed = snprintf(dst_buffer + written, dst_size - written,
-                                    "%02X ", src_buffer[i]);
+                                          "%02X ", src_buffer[i]);
         if (bytes_needed < 0 || written + bytes_needed >= dst_size)
         {
             // 如果目标缓冲区空间不足，截断并返回已写入的字符数

@@ -15,21 +15,20 @@
 #include "mqtt_logger.h"
 
 static const char* TAG = "UARTManager";
+
 // 波特率
 #define BAUD_RATE (115200)
 // UART事件队列大小
 #define UART_EVENT_QUEUE_SIZE (10)
-
 // 累积缓冲区大小
 #define ACCUMULATE_BUF_SIZE (RING_BUFFER_SIZE + 512)
 
+// GPIO Define
 #define UART_RX_PIN GPIO_NUM_5
 #define UART_TX_PIN GPIO_NUM_4
-// #define UART_RTS_PIN GPIO_NUM_6
-// #define UART_CTS_PIN GPIO_NUM_7
-
 #define UART_PORT UART_NUM_1
 
+// Task Constants
 #define UART_EVENT_TASK_STACK_SIZE (4096)
 #define RING_BUFFER_TASK_STACK_SIZE (4096)
 #define MQTT_MESSAGE_TASK_STACK_SIZE (4096)
@@ -59,18 +58,16 @@ void uart_init()
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE // 明确禁用硬件流控
-        // .flow_ctrl = UART_HW_FLOWCTRL_CTS_RTS, // 硬件流控制
-        // .rx_flow_ctrl_thresh = 122, // RTS信号的触发阈值
     };
 
     // 安装UART驱动，启用DMA
     const esp_err_t err =
-        uart_driver_install(UART_PORT, // UART端口号
-                            UART_BUF_SIZE * 2, // RX缓冲区大小 最好是UART_FIFO_LEN(128）的整数倍
-                            UART_BUF_SIZE, // TX缓冲区大小
+        uart_driver_install(UART_PORT,             // UART端口号
+                            UART_BUF_SIZE * 2,     // RX缓冲区大小 最好是UART_FIFO_LEN(128）的整数倍
+                            UART_BUF_SIZE,         // TX缓冲区大小
                             UART_EVENT_QUEUE_SIZE, // 事件队列的大小
-                            &uart_event_queue, // 事件队列的句柄
-                            ESP_INTR_FLAG_IRAM  // 中断分配标志
+                            &uart_event_queue,     // 事件队列的句柄
+                            ESP_INTR_FLAG_IRAM     // 中断分配标志
         );
     if (err != ESP_OK)
     {
@@ -81,13 +78,11 @@ void uart_init()
     // 初始化 UART 参数
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &uart_config));
     // 设置 UART 引脚
-    // ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_PIN, UART_RX_PIN,
-    //     UART_RTS_PIN, UART_CTS_PIN));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_PIN, UART_RX_PIN,
         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     // 创建RAW DATA环形缓冲区
-    raw_rb_handle = xRingbufferCreate(RING_BUFFER_SIZE, // 缓冲区大小
+    raw_rb_handle = xRingbufferCreate(RING_BUFFER_SIZE,      // 缓冲区大小
                                       RINGBUF_TYPE_BYTEBUF); // 类型
     if (raw_rb_handle == NULL)
     {
@@ -98,7 +93,7 @@ void uart_init()
 
     // 创建接收UART事件的任务
     if (xTaskCreate(handle_uart_event_task, "handle_uart_event_task",
-                    UART_EVENT_TASK_STACK_SIZE, NULL, configMAX_PRIORITIES-1,
+                    UART_EVENT_TASK_STACK_SIZE, NULL, TASK_PRIORITY_UART_EVENT,
                     NULL) != pdPASS)
     {
         ESP_LOGE(TAG, "Failed to create UART event task");
@@ -183,42 +178,30 @@ static void handle_uart_event_task(void* pvParameters)
                          * 读取新数据到临时缓冲区，考虑到协议数据包最大长度和接收缓冲区大小一致，理论不会超，采用简单的截取方案
                          */
                         static uint8_t tmp_buf[UART_BUF_SIZE];
-                        // const size_t read_size = MIN(event.size, UART_BUF_SIZE);
                         size_t buffered_size;
                         ESP_ERROR_CHECK(uart_get_buffered_data_len(UART_PORT, &buffered_size));
-                        const int len = uart_read_bytes(UART_PORT, tmp_buf, buffered_size, (100/portTICK_PERIOD_MS));
+                        const int len = uart_read_bytes(UART_PORT, tmp_buf, buffered_size, (100 / portTICK_PERIOD_MS));
                         if (len <= 0)
                         {
                             continue;
                         }
 
-                        // 设置一个较小的超时值,以确保尽可能多地读取数据
-                        // const int len = uart_read_bytes(UART_PORT, tmp_buf, read_size,
-                        //                                 portMAX_DELAY);
-                        // debug
-                        mqtt_log_write(MQTT_LOG_INFO, TAG, "event.size=%d, UART_BUF_SIZE=%d, len=%d", event.size,
-                                       UART_BUF_SIZE, len);
-
                         // 仅将原始数据存入缓冲区
                         if (xRingbufferSend(raw_rb_handle, tmp_buf, len, portMAX_DELAY) != pdTRUE)
                         {
-                            // debug
-                            // ESP_LOGE(TAG, "Failed to send raw data to ringbuffer, retrying...");
-                            mqtt_log_write(MQTT_LOG_ERROR, TAG, "Failed to send raw data to ringbuffer, retrying...");
+                            LOG_E(MQTT_LOG_ERROR, TAG, "Failed to send raw data to ringbuffer, retrying...");
 
                             vTaskDelay(10 / portTICK_PERIOD_MS);
                             if (xRingbufferSend(raw_rb_handle, tmp_buf, len, portMAX_DELAY) != pdTRUE)
                             {
-                                // ESP_LOGE(TAG, "Retry failed, dropping data...");
-                                mqtt_log_write(MQTT_LOG_ERROR, TAG, "Retry failed, dropping data...");
+                                LOG_E(MQTT_LOG_ERROR, TAG, "Retry failed, dropping data...");
                             }
                         }
                         break;
                     }
                 case UART_FIFO_OVF:
                     {
-                        // ESP_LOGI(TAG, "hw fifo overflow");
-                        mqtt_log_write(MQTT_LOG_ERROR, TAG, "hw fifo overflow");
+                        LOG_E(MQTT_LOG_ERROR, TAG, "hw fifo overflow");
                         // If fifo overflow happened, you should consider adding flow control
                         // for your application. The ISR has already reset the rx FIFO, As an
                         // example, we directly flush the rx buffer here in order to read more
@@ -230,8 +213,7 @@ static void handle_uart_event_task(void* pvParameters)
                 case UART_BUFFER_FULL:
                     {
                         // Event of UART ring buffer full
-                        // ESP_LOGI(TAG, "ring buffer full");
-                        mqtt_log_write(MQTT_LOG_ERROR, TAG, "ring buffer full");
+                        LOG_E(MQTT_LOG_ERROR, TAG, "ring buffer full");
                         // If buffer full happened, you should consider increasing your buffer
                         // size As an example, we directly flush the rx buffer here in order
                         // to read more data.
@@ -242,35 +224,30 @@ static void handle_uart_event_task(void* pvParameters)
                 case UART_BREAK:
                     {
                         // Event of UART RX break detected
-                        // ESP_LOGI(TAG, "uart rx break");
-                        mqtt_log_write(MQTT_LOG_ERROR, TAG, "uart rx break");
+                        LOG_E(MQTT_LOG_ERROR, TAG, "uart rx break");
                         uart_flush_input(UART_PORT);
                         // xQueueReset(uart_event_queue);
                         break;
                     }
                 case UART_PARITY_ERR:
                     {
-                        // ESP_LOGI(TAG, "uart parity error");
-                        mqtt_log_write(MQTT_LOG_ERROR, TAG, "uart parity error");
+                        LOG_E(MQTT_LOG_ERROR, TAG, "uart parity error");
                         break;
                     }
                 case UART_FRAME_ERR:
                     {
-                        // ESP_LOGI(TAG, "uart frame error");
-                        mqtt_log_write(MQTT_LOG_ERROR, TAG, "uart frame error");
+                        LOG_E(MQTT_LOG_ERROR, TAG, "uart frame error");
                         uart_flush_input(UART_PORT);
                         break;
                     }
                 case UART_PATTERN_DET:
                     {
-                        // ESP_LOGI(TAG, "uart pattern detected");
-                        mqtt_log_write(MQTT_LOG_ERROR, TAG, "uart pattern detected");
+                        LOG_E(MQTT_LOG_ERROR, TAG, "uart pattern detected");
                         break;
                     }
                 default:
                     {
-                        mqtt_log_write(MQTT_LOG_ERROR, TAG, "uart event type: %d", event.type);
-                        // ESP_LOGI(TAG, "uart event type: %d", event.type);
+                        LOG_E(MQTT_LOG_ERROR, TAG, "uart event type: %d", event.type);
                         break;
                     }
             }

@@ -19,8 +19,8 @@ static int s_retry_count = 0;
 static bool s_wifi_task_running = false;
 
 // WiFi事件处理函数
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                               int32_t event_id, void* event_data)
+static void wifi_event_handler(void* arg, const esp_event_base_t event_base,
+                               const int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT)
     {

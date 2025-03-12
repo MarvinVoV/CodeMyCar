@@ -9,19 +9,20 @@ extern "C" {
 #endif
 
 // 系统级事件位定义
-typedef enum {
-  EVENT_WIFI_CONNECTED = BIT0,     // WiFi连接成功
-  EVENT_WIFI_DISCONNECTED = BIT1,  // WiFi断开连接
-  EVENT_WIFI_GOT_IP = BIT2,        // WiFi已获取IP地址
+typedef enum
+{
+    EVENT_WIFI_CONNECTED = BIT0,    // WiFi连接成功
+    EVENT_WIFI_DISCONNECTED = BIT1, // WiFi断开连接
+    EVENT_WIFI_GOT_IP = BIT2,       // WiFi已获取IP地址
 
-  EVENT_HTTP_REQ_SENT = BIT3,  // HTTP请求已发送
-  EVENT_HTTP_RSP_RCVD = BIT4,  // HTTP响应已接收
+    EVENT_HTTP_REQ_SENT = BIT3, // HTTP请求已发送
+    EVENT_HTTP_RSP_RCVD = BIT4, // HTTP响应已接收
 
-  EVENT_MQTT_CONNECTED = BIT5,     // MQTT连接成功
-  EVENT_MQTT_DISCONNECTED = BIT6,  // MQTT连接断开
+    EVENT_MQTT_CONNECTED = BIT5,    // MQTT连接成功
+    EVENT_MQTT_DISCONNECTED = BIT6, // MQTT连接断开
 
-  UART_INIT_COMPLETE = BIT7,  // UART初始化完成
-  UART_ERROR = BIT8,          // UART错误
+    UART_INIT_COMPLETE = BIT7, // UART初始化完成
+    UART_ERROR = BIT8,         // UART错误
 } SystemEventBits;
 
 /**

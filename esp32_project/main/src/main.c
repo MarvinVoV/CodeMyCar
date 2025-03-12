@@ -35,7 +35,7 @@ void app_main(void)
             app_events_get_group(),
             EVENT_WIFI_CONNECTED | EVENT_WIFI_GOT_IP | EVENT_WIFI_DISCONNECTED |
             UART_INIT_COMPLETE | EVENT_MQTT_CONNECTED,
-            pdTRUE, // 自动清除事件位
+            pdTRUE,  // 自动清除事件位
             pdFALSE, // 等待任意事件位发生
             pdMS_TO_TICKS(100));
 
