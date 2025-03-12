@@ -6,8 +6,6 @@ from typing import Union, Dict, Optional, NamedTuple
 from app.device.protocol.common import PROTOCOL_MAX_DATA_LEN, FRAME_HEADER, FRAME_TAIL
 
 
-# from common import FRAME_HEADER, FRAME_TAIL, PROTOCOL_MAX_DATA_LEN
-
 
 # ---------- 基础类型定义 ----------
 class CtrlType(IntEnum):
@@ -307,26 +305,27 @@ class LogEntry(NamedTuple):
 class LogParser:
     """UART日志协议解析器"""
 
-    # 协议固定参数（与 C 的 MAX_LOG_LEN 保持一致）
-    MAX_LOG_LEN = 100      # 消息字段固定长度
-    STRUCT_FORMAT = "<IHB100s"  # 格式：小端, uint32, uint16, uint8, 100字节数组
-    EXPECTED_SIZE = struct.calcsize(STRUCT_FORMAT)  # 4+2+1+100=107 字节
+    # 协议固定参数
+    HEADER_FORMAT = "<IHB"  # 格式：小端, uint32, uint16, uint8
+    HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  # # 4+2+1=7字节
 
     def __init__(self):
-        self._struct = struct.Struct(self.STRUCT_FORMAT)
+        self._header_struct = struct.Struct(self.HEADER_FORMAT)
 
     def parse(self, data: bytes) -> LogEntry:
         """解析二进制数据"""
-        # 严格校验数据长度
-        if len(data) != self.EXPECTED_SIZE:
+        # 基础校验：至少包含头部数据
+        if len(data) < self.HEADER_SIZE:
             raise ValueError(
-                f"Invalid data length: expected {self.EXPECTED_SIZE}, got {len(data)}"
+                f"Data too short: minimum {self.HEADER_SIZE} bytes, got {len(data)}"
             )
 
-        # 解包数据（自动处理小端字节序）
-        timestamp, module, level, raw_msg = self._struct.unpack(data)
+        # 解包头部分（自动处理小端字节序）
+        header_data = data[:self.HEADER_SIZE]
+        timestamp, module, level = self._header_struct.unpack(header_data)
 
-        # 提取有效消息内容（截断到第一个空字符）
+        # 处理消息部分（剩余字节）
+        raw_msg = data[self.HEADER_SIZE:]
         message = self._trim_null_bytes(raw_msg)
 
         return LogEntry(
@@ -344,6 +343,6 @@ class LogParser:
         return raw.decode('utf-8', errors='replace')
 
     @property
-    def expected_size(self) -> int:
-        """返回协议规定的数据包大小"""
-        return self.EXPECTED_SIZE
+    def min_size(self) -> int:
+        """返回协议最小有效数据长度"""
+        return self.HEADER_SIZE + 1  # 至少包含1字节消息内容（含终止符）

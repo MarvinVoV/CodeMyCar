@@ -63,19 +63,24 @@ def setup_logging(settings: Settings):
         app_handler.setFormatter(app_formatter)
         handlers.append(app_handler)
 
-        # 设备日志文件处理器
-        devices = ["stm32", "esp32"]
-        for device in devices:
+        # 设备日志文件处理器（STM32保持JSON，ESP32改为纯文本）
+        devices = [
+            ("stm32", structlog.processors.JSONRenderer()),  # STM32保持JSON
+            ("esp32", _get_text_renderer())  # ESP32使用文本格式
+        ]
+        for device, renderer in devices:
             handler = RotatingFileHandler(
                 filename=log_dir / f"{device}.log",
                 maxBytes=settings.LOG_MAX_SIZE,
                 backupCount=settings.LOG_BACKUP_COUNT,
+                encoding='utf-8'
             )
             formatter = ProcessorFormatter(
-                processor=structlog.processors.JSONRenderer(),
+                processor=renderer,
                 foreign_pre_chain=processors[:-1],
             )
             handler.setFormatter(formatter)
+
             # 创建设备专用的日志器并添加处理器
             device_logger = logging.getLogger(f"device.{device}")
             device_logger.addHandler(handler)
@@ -87,7 +92,15 @@ def setup_logging(settings: Settings):
     root_logger.handlers = handlers
     root_logger.setLevel(settings.LOG_LEVEL.upper())
 
-
+def _get_text_renderer() -> structlog.dev.ConsoleRenderer:
+    """自定义文本格式渲染器"""
+    return structlog.dev.ConsoleRenderer(
+        pad_event=0,        # 不填充事件字段
+        colors=False,       # 禁用颜色代码
+        force_colors=False,
+        timestamp_key="%Y-%m-%d %H:%M:%S",
+        level_styles=None   # 禁用等级样式
+    )
 def add_custom_timestamp(logger, method_name, event_dict):
     """添加自定义时间戳，精确到毫秒。"""
     now = datetime.datetime.now()

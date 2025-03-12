@@ -40,17 +40,17 @@ static void LogTask_Execute(void* argument)
         osThreadTerminate(NULL);
     }
 
-    log_entry_t* entry;
+    log_entry_t* received_entry;
     while (1)
     {
         // 等待队列中的日志（永久阻塞）
-        if (osMessageQueueGet(log_queue, &entry, NULL, osWaitForever) == osOK)
+        if (osMessageQueueGet(log_queue, &received_entry, NULL, osWaitForever) == osOK)
         {
             // 日志处理
-            UART_Send_Protocol_Log(entry);
+            UART_Send_Protocol_Log(received_entry);
 
             // 释放内存块
-            osMemoryPoolFree(log_pool, entry);
+            vPortFree(received_entry);
         }
     }
 }

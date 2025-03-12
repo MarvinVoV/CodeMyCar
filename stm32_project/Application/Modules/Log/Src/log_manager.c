@@ -7,9 +7,7 @@
 #include "log_task.h"
 #include "queue_manager.h"
 
-//
 
-osMemoryPoolId_t log_pool = NULL;    // 内存池句柄
 osMessageQueueId_t log_queue = NULL; // 消息队列句柄
 
 static log_output_channel* channels[LOG_MAX_CHANNELS] = {NULL};
@@ -31,14 +29,7 @@ void LogManager_AddOutputChannel(log_output_channel* channel)
 
 void LogManager_Init(void)
 {
-    // 创建内存池：5个块，每个块大小为日志结构体
-    log_pool = osMemoryPoolNew(LOG_POOL_BLOCKS, sizeof(log_entry_t), NULL);
-    if (log_pool == NULL)
-    {
-        /* 处理错误 */
-    }
-
-    // 创建消息队列：10个消息，每个消息大小为日志结构体的指针
+    // 消息队列保存指针（每个元素大小 = 指针大小）
     log_queue = osMessageQueueNew(LOG_QUEUE_SIZE, sizeof(log_entry_t*), NULL);
     if (log_queue == NULL)
     {
@@ -55,57 +46,61 @@ void LogManager_Init(void)
 void log_record(const log_level_t level, const log_module_t module, const char* format, ...)
 {
     /* 参数有效性检查 */
-    if (!format || (level & LOG_LEVEL_FILTER) == 0 ||
-        (module & LOG_MODULE_FILTER) == 0)
+    if (!format || (level & LOG_LEVEL_FILTER) == 0 || (module & LOG_MODULE_FILTER) == 0)
     {
         return;
     }
 
-    // 申请内存块（0表示不等待）
-    log_entry_t* entry = osMemoryPoolAlloc(log_pool, 0);
+    va_list args;
+    int msg_len = 0;
+    log_entry_t* entry = NULL;
+    char* msg_buffer = NULL;
+
+    // 1. 计算实际需要的消息长度
+    va_start(args, format);
+    /*
+     * (1) NULL 和 0 参数组合：指示函数仅计算长度而不实际写入
+     * (2) 返回值：返回格式化内容的理论长度（不含终止符）
+     * (3) +1 操作：为字符串终止符 \0 预留空间
+     */
+    msg_len = vsnprintf(NULL, 0, format, args) + 1;
+    va_end(args);
+    // 添加长度限制
+    if (msg_len > MAX_LOG_LEN) {
+        msg_len = MAX_LOG_LEN;
+    }
+
+    // 1.1. 动态分配内存：结构体基础大小 + 实际消息长度
+    const size_t entry_size = sizeof(log_entry_t) + msg_len;
+    entry = (log_entry_t*)pvPortMalloc(entry_size);
+
     if (entry == NULL)
     {
-        // 处理内存不足（如丢弃日志或等待）
+        // vApplicationMallocFailedHook()
         return;
     }
-    memset(entry, 0, sizeof(log_entry_t));
 
+    memset(entry, 0, sizeof(log_entry_t));
     /* 填充基础信息 */
     entry->timestamp = osKernelGetTickCount();
     entry->module = module;
     entry->level = level;
+    /* 消息缓冲区定位（柔性数组成员） */
+    msg_buffer = entry->message;
 
-    /* 格式化日志内容（带溢出保护） */
-    if (strchr(format, '%') == NULL)
-    {
-        strncpy(entry->message, format, sizeof(entry->message) - 1);
-        entry->message[sizeof(entry->message) - 1] = '\0';
+
+    // 2. 实际格式化内容
+    va_start(args, format);
+    const int actual_len = vsnprintf(msg_buffer, msg_len, format, args);
+    va_end(args);
+    /* 处理格式化结果 */
+    if (actual_len < 0) {
+        strcpy(msg_buffer, "[LOG FORMAT ERROR]");
+    } else {
+        msg_buffer[actual_len] = '\0'; // 确保终止符
     }
-    else
-    {
-        va_list args;
-        va_start(args, format);
-        const int len = vsnprintf(entry->message,
-                                  sizeof(entry->message) - 1, // 保留1字节给结束符
-                                  format, args);
-        va_end(args);
-        /* 处理格式化结果 */
-        if (len < 0)
-        {
-            // 格式化错误处理
-            strcpy(entry->message, "[LOG FORMAT ERROR]");
-        }
-        else if (len >= sizeof(entry->message))
-        {
-            // 添加截断标记
-            entry->message[sizeof(entry->message) - 2] = '~';
-            entry->message[sizeof(entry->message) - 1] = '\0';
-        }
-        else
-        {
-            entry->message[len] = '\0'; // 确保终止符
-        }
-    }
+
+
     // Dispatch
     log_dispatch_entry(entry);
 }
@@ -144,6 +139,6 @@ static void log_dispatch_entry(log_entry_t* entry)
     // 若未入队（例如仅有直接通道），立即释放
     if (!entry_queued)
     {
-        osMemoryPoolFree(log_pool, entry);
+        vPortFree(entry);
     }
 }

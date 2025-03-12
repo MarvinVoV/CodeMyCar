@@ -120,8 +120,10 @@ bool UART_Send_Protocol_Log(log_entry_t* log_entry)
     {
         return false;
     }
-    return UART_Send_To_Esp((uint8_t*)log_entry, sizeof(log_entry_t),
-                            PROTOCOL_TYPE_LOG);
+    // 计算实际总长度
+    const size_t total_size = sizeof(log_entry_t) + strlen(log_entry->message) + 1;
+
+    return UART_Send_To_Esp((uint8_t*)log_entry, total_size, PROTOCOL_TYPE_LOG);
 }
 
 static bool UART_Send_To_Esp(const uint8_t* data, const uint16_t length, const protocol_type_t type)

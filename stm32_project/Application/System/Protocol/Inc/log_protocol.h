@@ -40,10 +40,10 @@ typedef enum
 #pragma pack(push, 1)
 typedef struct
 {
-    uint32_t timestamp;                  // 时间戳（单位ms）
-    uint16_t module;                     // 模块标识（log_module_t）
-    uint8_t level;                       // 日志级别（log_level_t）
-    char message[MAX_LOG_LEN]; // 日志正文
+    uint32_t timestamp; // 时间戳（单位ms）
+    uint16_t module;    // 模块标识（log_module_t）
+    uint8_t level;      // 日志级别（log_level_t）
+    char message[];     // 日志正文 柔性数组 最大长度
 } log_entry_t;
 #pragma pack(pop)
 
