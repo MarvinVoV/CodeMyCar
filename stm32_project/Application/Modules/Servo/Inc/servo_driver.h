@@ -17,22 +17,43 @@
 #define SERVO_ANGLE_MIN 0     // 最小角度 (0°)
 #define SERVO_ANGLE_MAX 180   // 最大角度 (180°)
 
-typedef enum {
-  SERVO_OK,
-  SERVO_OVERHEAT,
-  SERVO_BLOCKED,
-  SERVO_COMM_ERROR
-} Servo_Status;
+typedef enum
+{
+    SERVO_IDLE,
+    SERVO_MOVING,
+    SERVO_ERROR
+} servo_status_t;
 
-typedef struct {
-  Servo_HWConfig hw;
-  float current_angle;
-  Servo_Status status;
-  uint32_t last_update;
-} Servo_Instance;
 
-void Servo_Init(Servo_Instance* servo);
-void Servo_SetAngle(Servo_Instance* servo, float angle);
-Servo_Status Servo_GetStatus(Servo_Instance* servo);
+typedef struct
+{
+    servo_hw_config hw;
+    int target_angle;
+    int current_angle;
+    servo_status_t status;
+    uint32_t last_update;
+    uint16_t move_speed; // 角度/秒
+    uint16_t max_accel;  // 角度/秒²
+} servo_instance_t;
+
+/**
+ * 初始化
+ * @param servo servo
+ */
+void servo_driver_init(servo_instance_t* servo);
+/**
+ * 设置目标角度
+ * @param servo servo
+ * @param angle target angle
+ */
+void servo_driver_set_angle(servo_instance_t* servo, int angle);
+
+/**
+ * 平滑设置角度
+ * @param servo servo
+ * @param target_angle target angle
+ * @param duration_ms interval
+ */
+void servo_driver_smooth_set_angle(servo_instance_t* servo, int target_angle, uint16_t duration_ms);
 
 #endif /* MODULES_SERVO_INC_SERVO_DRIVER_H_ */

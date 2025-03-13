@@ -11,7 +11,7 @@
 #include "queue_manager.h"
 #include "servo_service.h"
 
-void servo_task_init(Servo_Instance* servo);
-void Servo_Task(void* arg);
+void servo_task_init(servo_instance_t* servo);
+void servo_task(void* arg);
 
 #endif /* TASKS_SERVOTASK_SERVO_TASK_H_ */

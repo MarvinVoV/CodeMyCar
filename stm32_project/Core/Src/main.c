@@ -39,7 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-Servo_Instance my_servo;
+servo_instance_t servo_instance;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -186,18 +186,17 @@ int main(void)
     /*初始化控制任务*/
     CtrlTask_Init();
 
-    // 初始化舵机
-    // Servo_HWConfig hw = {
-    //     .pwm_tim = &htim2,
-    //     .channel = TIM_CHANNEL_1,
-    //     .min_pulse = 500,
-    //     .max_pulse = 2500,
-    //     .min_angle = 0,
-    //     .max_angle = 180
-    // };
-    // my_servo.hw = hw;
-
-    // Servo_Init(&my_servo);
+    // 舵机初始化
+    const servo_hw_config servo_hw_config = {
+        .pwm_tim = &htim2,
+        .channel = TIM_CHANNEL_1,
+        .min_pulse = 500,
+        .max_pulse = 2500,
+        .min_angle = 0,
+        .max_angle = 180
+    };
+    servo_instance.hw = servo_hw_config;
+    servo_service_init(&servo_instance);
 
 
   /* USER CODE END RTOS_THREADS */

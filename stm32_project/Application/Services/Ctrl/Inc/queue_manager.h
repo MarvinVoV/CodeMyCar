@@ -13,12 +13,12 @@
 
 typedef enum
 {
-    QUEUE_TYPE_LOG = 0x01, // 日志
-    QUEUE_TYPE_SERVO, // 舵机
-    QUEUE_TYPE_MOTOR, // 电机
-    QUEUE_TYPE_SYS, // 系统
+    QUEUE_TYPE_LOG = 0x01,    // 日志
+    QUEUE_TYPE_SERVO,         // 舵机
+    QUEUE_TYPE_MOTOR,         // 电机
+    QUEUE_TYPE_SYS,           // 系统
     QUEUE_TYPE_UART_RAW_DATA, // UART 原始数据
-    QUEUE_TYPE_MAX // 仅判断
+    QUEUE_TYPE_MAX            // 仅判断
 } queue_type;
 
 typedef struct

@@ -34,6 +34,7 @@ typedef enum
     LOG_MODULE_SENSOR = 0x0004,  // 传感器
     LOG_MODULE_NETWORK = 0x0008, // 网络通信
     LOG_MODULE_DRIVER = 0x0010,  // 设备驱动
+    LOG_MODULE_SERVO = 0x0010,   // 舵机模块
     LOG_MODULE_ALL = 0xFFFF      // 所有模块
 } log_module_t;
 

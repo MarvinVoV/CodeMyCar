@@ -86,6 +86,10 @@ static void dispatcher(uint8_t type, const uint8_t* frame_data, const uint16_t f
     {
         LOG_INFO(LOG_MODULE_SYSTEM, "Receive debug %.*s\n", cmd->data.text.len, cmd->data.text.msg);
     }
+    else
+    {
+        QueueManager_DispatchCommand(cmd);
+    }
 }
 
 static void process_raw_data(const uint8_t* raw_data, const uint16_t len)

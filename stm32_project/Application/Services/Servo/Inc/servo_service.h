@@ -11,8 +11,8 @@
 #include "ctrl_protocol.h"
 #include "servo_driver.h"
 
-void Servo_Service_Init(Servo_Instance* servo);
+void servo_service_init(servo_instance_t* servo);
 
-void Servo_ExecuteCommand(Servo_Instance* servo, control_cmd_t* cmd);
+void servo_service_exec_cmd(servo_instance_t* servo, const control_cmd_t* cmd);
 
 #endif /* SERVICES_SERVO_INC_SERVO_SERVICE_H_ */
