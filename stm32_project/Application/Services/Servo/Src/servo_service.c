@@ -48,5 +48,5 @@ void servo_service_exec_cmd(servo_instance_t* servo, const control_cmd_t* cmd)
     const uint8_t angle = cmd->data.servo.angle;
 
     // 调用舵机设置角度函数
-    servo_driver_set_angle(servo, angle);
+    servo_driver_set_smooth_angle(servo, angle, 15);
 }

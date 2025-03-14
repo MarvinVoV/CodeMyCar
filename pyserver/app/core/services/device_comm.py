@@ -31,14 +31,14 @@ class DeviceCommunicationService:
                     payload = DevicePayload().build_text(ping_cmd.echo_message)
                     frame = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value).set_payload(
                         payload).build_frame()
-                    logger.info(" ".join(f"{byte:02X}" for byte in frame))
+                    # logger.info(" ".join(f"{byte:02X}" for byte in frame))
             elif cmd_type == CommandType.SERVO:
                 if isinstance(command.payload, ServoCommand):
                     servo_cmd = command.payload
                     payload = DevicePayload().build_servo(servo_cmd.angle)
                     frame = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value).set_payload(
                         payload).build_frame()
-                    logger.info(" ".join(f"{byte:02X}" for byte in frame))
+                    # logger.info(" ".join(f"{byte:02X}" for byte in frame))
             else:
                 return CommandResponse(
                     status=500,

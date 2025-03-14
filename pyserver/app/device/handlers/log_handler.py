@@ -24,7 +24,7 @@ async def handle_device_log(topic: str, payload: Union[bytes, dict, str]):
                 logger_esp32.info(raw_log)
         elif 'stm32' in topic.lower():
             if isinstance(payload, bytes):
-                logger.info(" ".join([f"{b:02x}" for b in payload]))
+                # logger.info(" ".join([f"{b:02x}" for b in payload]))
                 log_entry = logParser.parse(payload)
                 logger_stm32.info(
                     timestamp=log_entry.timestamp,

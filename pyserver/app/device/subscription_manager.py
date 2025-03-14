@@ -31,7 +31,7 @@ class SubscriptionManager:
         try:
             # 获取原始二进制payload
             raw_payload = msg.payload
-            logger.info(f"Received raw message on {msg.topic} (length: {len(raw_payload)} bytes")
+            logger.debug(f"Received raw message on {msg.topic} (length: {len(raw_payload)} bytes")
 
             # 查找匹配的处理函数
             for topic_pattern, handler in self._handlers.items():

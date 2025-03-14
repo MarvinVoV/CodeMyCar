@@ -44,10 +44,22 @@ void servo_task(void* arg)
 
     while (1)
     {
-        // 从队列中获取命令
-        if (osMessageQueueGet(servoCommandQueue, &cmd, NULL, osWaitForever) == osOK)
+        /*
+         * 1. 优先处理队列中的新命令（非阻塞模式）
+         * 2. 命令抢占: 新命令会立即更新 target_angle，当前运动自动转向新目标
+         */
+
+        // 动态超时：运动时等待步延时，空闲时等待10ms
+        const uint32_t timeout = servo->status == SERVO_MOVING ? servo->step_delay : 10;
+        if (osMessageQueueGet(servoCommandQueue, &cmd, NULL, timeout) == osOK)
         {
             servo_service_exec_cmd(servo, &cmd);
+        }
+
+        // 执行平滑运动更新
+        if (servo->status == SERVO_MOVING)
+        {
+            servo_driver_update_smooth(servo);
         }
     }
 }

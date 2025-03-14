@@ -269,13 +269,13 @@ static void handle_ring_buffer_task(void* pvParameters)
         if (raw_data == NULL)
         {
             // ESP_LOGE(TAG, "Ringbuffer receive returned NULL");
-            mqtt_log_write(MQTT_LOG_ERROR, TAG, "Ringbuffer receive returned NULL");
+            LOG_E(MQTT_LOG_ERROR, TAG, "Ringbuffer receive returned NULL");
             continue;
         }
         if (item_size == 0)
         {
             // ESP_LOGE(TAG, "Invalid zero-length data");
-            mqtt_log_write(MQTT_LOG_ERROR, TAG, "Invalid zero-length data");
+            LOG_E(MQTT_LOG_ERROR, TAG, "Invalid zero-length data");
             vRingbufferReturnItem(raw_rb_handle, raw_data);
             continue;
         }

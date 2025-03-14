@@ -57,6 +57,8 @@ bool servo_hal_set_angle(int angle)
     uint16_t pulse_width = serv_config.min_pulse +
         ((pulse_range * (angle - serv_config.min_angle) + angle_scale / 2) / angle_scale);
 
+    // LOG_INFO(LOG_MODULE_SERVO, "Setting angle=%d, pulse=%uus", angle, pulse_width);
+
     // 验证脉冲范围
     const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(serv_config.pwm_tim);
     if (pulse_width > arr)
