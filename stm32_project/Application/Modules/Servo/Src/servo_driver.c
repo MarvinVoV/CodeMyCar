@@ -26,7 +26,8 @@ void servo_driver_init(servo_instance_t* servo)
     servo->current_angle = 90;
     servo->target_angle = 90;
     servo->status = SERVO_IDLE;
-    servo->step_delay = 15; // 默认速度15ms/度
+    servo->step_size = 1;   // 默认 1 度
+    servo->base_delay = 15; // 默认速度15ms/度
 }
 
 // 带运动控制的设置函数
@@ -41,35 +42,40 @@ void servo_driver_set_smooth_angle(servo_instance_t* servo, int angle, const uin
 
     // 配置运动参数
     servo->target_angle = angle;
-    servo->step_delay = speed_ms; // 每度移动时间
+    servo->initial_angle = servo->current_angle;
+    servo->base_delay = speed_ms; // 每度移动时间
     servo->status = SERVO_MOVING;
 
     // 立即执行第一次更新
-    servo_driver_update_smooth(servo);
-
+    servo_driver_update_smooth(servo, servo->step_size);
 }
 
 // 非阻塞式平滑角度设置 (需在主循环中周期性调用)
-void servo_driver_update_smooth(servo_instance_t* servo)
+void servo_driver_update_smooth(servo_instance_t* servo, const int step_size)
 {
     if (!servo || servo->status != SERVO_MOVING) return;
 
     // 单步逼近
     const int delta = servo->target_angle - servo->current_angle;
-    if (delta == 0) {
+    if (delta == 0)
+    {
         servo->status = SERVO_IDLE;
         return;
     }
 
-    const int step = (delta > 0) ? 1 : -1;
+    // 动态计算实际步长（不超过剩余角度差）
+    int actual_step = (abs(delta) >= step_size) ? step_size : abs(delta);
+    actual_step *= (delta > 0) ? 1 : -1;
 
-    if (abs(delta) > 0) {
+    if (abs(delta) > 0)
+    {
         // 逐度逼近
-        servo->current_angle += step;
+        servo->current_angle += actual_step;
         servo_hal_set_angle(servo->current_angle);
 
         // 到达目标后停止
-        if (servo->current_angle == servo->target_angle) {
+        if (servo->current_angle == servo->target_angle)
+        {
             servo->status = SERVO_IDLE;
         }
     }

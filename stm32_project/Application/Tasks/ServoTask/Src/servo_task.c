@@ -12,7 +12,11 @@
 #include "queue_manager.h"
 #include "servo_service.h"
 
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+
 static osThreadId_t servoTaskHandle = NULL;
+uint16_t calculate_dynamic_delay(int remaining_steps, int total_steps, uint16_t base_delay);
 
 void servo_task_init(servo_instance_t* servo)
 {
@@ -48,10 +52,7 @@ void servo_task(void* arg)
          * 1. 优先处理队列中的新命令（非阻塞模式）
          * 2. 命令抢占: 新命令会立即更新 target_angle，当前运动自动转向新目标
          */
-
-        // 动态超时：运动时等待步延时，空闲时等待10ms
-        const uint32_t timeout = servo->status == SERVO_MOVING ? servo->step_delay : 10;
-        if (osMessageQueueGet(servoCommandQueue, &cmd, NULL, timeout) == osOK)
+        if (osMessageQueueGet(servoCommandQueue, &cmd, NULL, 0) == osOK)
         {
             servo_service_exec_cmd(servo, &cmd);
         }
@@ -59,7 +60,40 @@ void servo_task(void* arg)
         // 执行平滑运动更新
         if (servo->status == SERVO_MOVING)
         {
-            servo_driver_update_smooth(servo);
+            const int current_angle = servo->current_angle;
+            const int target_angle = servo->target_angle;
+            const int remaining_steps = abs(target_angle - current_angle);
+            const int total_steps = abs(target_angle - servo->initial_angle);
+            const int step = (remaining_steps > 3 * servo->step_size) ? servo->step_size : 1; // 接近目标时切回小步长
+
+            const uint16_t delay = calculate_dynamic_delay(remaining_steps, total_steps, servo->base_delay);
+
+            servo_driver_update_smooth(servo, step);
+            osDelay(delay);
+        }
+        else
+        {
+            osDelay(10);
         }
     }
+}
+
+// 修改后的延时计算函数
+uint16_t calculate_dynamic_delay(const int remaining_steps, const int total_steps, const uint16_t base_delay)
+{
+    if (total_steps == 0) return base_delay; // 防零除错误
+    // 加速阶段（前30%步数）
+    if (remaining_steps > total_steps * 0.7)
+    {
+        return MAX(base_delay / 2, 2);
+    }
+
+    // 减速阶段（后30%步数）
+    if (remaining_steps < total_steps * 0.3)
+    {
+        return MIN(base_delay * 2, 10);
+    }
+
+    // 匀速阶段
+    return base_delay;
 }

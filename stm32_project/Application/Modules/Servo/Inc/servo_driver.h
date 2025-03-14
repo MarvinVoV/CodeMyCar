@@ -27,12 +27,14 @@ typedef enum
 
 typedef struct
 {
-    servo_hw_config hw;
-    int target_angle;
-    int current_angle;
-    servo_status_t status;
-    uint16_t step_delay;   // 步进间隔ms (控制速度)
-    uint32_t last_update;
+    servo_hw_config hw;    // 硬件配置
+    int target_angle;      // 目标角度
+    int current_angle;     // 当前角度(运动过程中)
+    int initial_angle;     // 记录运动起始角度
+    servo_status_t status; // 状态
+    int step_size;         // 步长 默认 1 度
+    uint16_t base_delay;   // 基准延时ms (建议5-20ms)
+    uint32_t last_update;  // 上次更新时间
 } servo_instance_t;
 
 /**
@@ -44,9 +46,10 @@ void servo_driver_init(servo_instance_t* servo);
  * 设置目标角度
  * @param servo servo
  * @param angle target angle
+ * @param speed_ms speed ms
  */
 void servo_driver_set_smooth_angle(servo_instance_t* servo, int angle, uint16_t speed_ms);
 
-void servo_driver_update_smooth(servo_instance_t* servo);
+void servo_driver_update_smooth(servo_instance_t* servo, int step_size);
 
 #endif /* MODULES_SERVO_INC_SERVO_DRIVER_H_ */

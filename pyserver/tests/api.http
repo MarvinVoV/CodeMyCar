@@ -14,7 +14,7 @@ Content-Type: application/json
 {
   "command_type": "servo",
   "payload": {
-    "angle": 85
+    "angle": 160
   }
 }
 
