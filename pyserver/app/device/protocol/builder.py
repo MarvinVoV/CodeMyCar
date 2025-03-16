@@ -1,191 +1,199 @@
 import json
 import struct
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 from typing import Union, Dict, Optional, NamedTuple
 
 from app.device.protocol.common import PROTOCOL_MAX_DATA_LEN, FRAME_HEADER, FRAME_TAIL
 
 
-
 # ---------- 基础类型定义 ----------
-class CtrlType(IntEnum):
-    CTRL_MOTOR = 0x01
-    CTRL_SERVO = 0x02
-    CTRL_TEXT = 0x03
-    CTRL_MAX = 0x04
+class CtrlField(IntFlag):
+    MOTOR = 1 << 0  # 电机控制有效
+    SERVO = 1 << 1  # 舵机控制有效
+    TEXT = 1 << 7  # 调试信息有效
 
 
-class MotorCommandType(IntEnum):
-    STOP = 0x00
-    FORWARD = 0x01
-    BACKWARD = 0x02
-    TURN_LEFT = 0x03
-    TURN_RIGHT = 0x04
+class MotorCtrlMode(IntEnum):
+    DIFFERENTIAL = 0x01  # 差速模式
+    DIRECT = 0x02  # 直接控制模式
+    EMERGENCY = 0x80  # 紧急模式
 
 
-# ---------- 命令数据基类 ----------
-class CommandData:
-    @classmethod
-    def from_bytes(cls, data: bytes):
-        raise NotImplementedError
+class MotorDiffCtrl(NamedTuple):
+    """ 差速模式参数"""
+    linear_vel: int  # 线速度（-3000~3000）
+    angular_vel: int  # 角速度（-1800~1800）
+    accel: int  # 加速度（0-100）
 
     def to_bytes(self) -> bytes:
-        raise NotImplementedError
-
-    @property
-    def size(self) -> int:
-        return len(self.to_bytes())
-
-
-# ---------- 具体命令实现 ----------
-class MotorData(CommandData):
-    FORMAT = '<4B'
-
-    def __init__(self, cmd_type: int, left: int, right: int, acc: int):
-        self.cmd_type = cmd_type
-        self.left = left
-        self.right = right
-        self.acc = acc
-
-    def to_bytes(self) -> bytes:
-        return struct.pack(self.FORMAT,
-                           self.cmd_type, self.left, self.right, self.acc)
+        return struct.pack('<hhB',
+                           self.linear_vel,
+                           self.angular_vel,
+                           self.accel)
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        return cls(*struct.unpack_from(cls.FORMAT, data))
+        return cls(*struct.unpack_from('<hhB', data))
 
 
-class ServoData(CommandData):
-    FORMAT = '<B'
-
-    def __init__(self, angle: int):
-        self.angle = angle
+class MotorDirectCtrl(NamedTuple):
+    """直接控制模式参数"""
+    left_speed: int  # 左电机速度（-1000~1000）
+    right_speed: int  # 右电机速度（-1000~1000）
+    left_accel: int  # 左加速度（0-100%）
+    right_accel: int  # 右加速度（0-100%）
 
     def to_bytes(self) -> bytes:
-        return struct.pack(self.FORMAT, self.angle)
+        return struct.pack('<hhBB',
+                           self.left_speed,
+                           self.right_speed,
+                           self.left_accel,
+                           self.right_accel)
 
     @classmethod
     def from_bytes(cls, data: bytes):
-        return cls(struct.unpack(cls.FORMAT, data)[0])
+        return cls(*struct.unpack_from('<hhBB', data))
 
 
-class TextData(CommandData):
-    def __init__(self, message: str):
-        self.message = message[:64]
+class ServoCtrl(NamedTuple):
+    """舵机控制参数"""
+    angle: int  # 角度（0~180）
+    speed: int  # 速度（0-100%）
 
     def to_bytes(self) -> bytes:
-        encoded = self.message.encode('utf-8')[:64]
+        return struct.pack('<BB', self.angle, self.speed)
+
+    @classmethod
+    def from_bytes(cls, data: bytes):
+        return cls(*struct.unpack_from('<BB', data))
+
+
+class TextData(NamedTuple):
+    message: str  # UTF-8字符串
+
+    def to_bytes(self) -> bytes:
+        encoded = self.message.encode('utf-8')[:255]
         return struct.pack('<B', len(encoded)) + encoded
 
     @classmethod
     def from_bytes(cls, data: bytes):
         length = data[0]
-        return cls(data[1:1 + length].decode('utf-8', errors='ignore'))
+        return cls(data[1:1 + length].decode('utf-8', 'ignore'))
 
 
 # ---------- 协议控制命令 ----------
 class ControlCmd:
-    def __init__(self, ctrl_id: int, ctrl_type: CtrlType, data: CommandData):
-        self.ctrl_id = ctrl_id
-        self.ctrl_type = ctrl_type
-        self.data = data
+    def __init__(self):
+        self.ctrl_id: int = 0
+        self.ctrl_fields: CtrlField = CtrlField(0)
+        self.motor_mode: Optional[MotorCtrlMode] = MotorCtrlMode.DIRECT
+        self.motor_data: Optional[Union[MotorDiffCtrl, MotorDirectCtrl]] = MotorDirectCtrl(0, 0, 0, 0)
+        self.servo_data: Optional[ServoCtrl] = ServoCtrl(0, 0)
+        self.text_data: Optional[TextData] = TextData("")
 
     def to_bytes(self) -> bytes:
-        header = struct.pack('<BB', self.ctrl_id, self.ctrl_type)
-        return header + self.data.to_bytes()
+        # 基础字段打包
+        header = struct.pack('<BB', self.ctrl_id, self.ctrl_fields)
+        payload = bytearray()
+
+        # 舵机控制数据
+        payload += (self.servo_data if self.servo_data else ServoCtrl(0, 0)).to_bytes()
+
+        # 电机数据
+        motor_mode = self.motor_mode if self.motor_mode is not None else 2
+        payload += struct.pack('<B', motor_mode)
+        if motor_mode == MotorCtrlMode.DIFFERENTIAL:
+            motor_data = self.motor_data if self.motor_data else MotorDiffCtrl(0, 0, 0)
+            payload += motor_data.to_bytes()
+        elif motor_mode == MotorCtrlMode.DIRECT:
+            motor_data = self.motor_data if self.motor_data else MotorDirectCtrl(0, 0, 0, 0)
+            payload += motor_data.to_bytes()
+        elif motor_mode == MotorCtrlMode.EMERGENCY:
+            pass  # 无数据
+        else:
+            # 模式0或未定义，填充6字节的0
+            payload += b'\x00\x00\x00\x00\x00\x00'
+
+        # 文本数据（无论是否启用，都包含）
+        payload += (self.text_data if self.text_data else TextData("")).to_bytes()
+
+        # 完整数据包
+        return header + payload
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'ControlCmd':
-        if isinstance(data, list):
-            data = bytes(data)
-        ctrl_id, ctrl_type = struct.unpack_from('<BB', data)
-        payload_data = data[2:]
+        cmd = cls()
+        pos = 0
 
-        if ctrl_type == CtrlType.CTRL_MOTOR:
-            data_cls = MotorData
-        elif ctrl_type == CtrlType.CTRL_SERVO:
-            data_cls = ServoData
-        elif ctrl_type == CtrlType.CTRL_TEXT:
-            data_cls = TextData
-        else:
-            raise ValueError("Unknown control type")
+        # 解析基础头
+        cmd.ctrl_id, cmd.ctrl_fields = struct.unpack_from('<BB', data, pos)
+        pos += 2
 
-        return cls(ctrl_id, CtrlType(ctrl_type), data_cls.from_bytes(payload_data))
+        # 先解析舵机数据
+        if cmd.ctrl_fields & CtrlField.SERVO:
+            cmd.servo_data = ServoCtrl.from_bytes(data[pos:pos + 2])
+            pos += 2
+
+        # 再解析电机数据
+        if cmd.ctrl_fields & CtrlField.MOTOR:
+            cmd.motor_mode = MotorCtrlMode(data[pos])
+            pos += 1
+            if cmd.motor_mode == MotorCtrlMode.DIFFERENTIAL:
+                cmd.motor_data = MotorDiffCtrl.from_bytes(data[pos:pos + 5])
+                pos += 5
+            elif cmd.motor_mode == MotorCtrlMode.DIRECT:
+                cmd.motor_data = MotorDirectCtrl.from_bytes(data[pos:pos + 6])
+                pos += 6
+
+        # 解析文本数据
+        if cmd.ctrl_fields & CtrlField.TEXT:
+            length = data[pos]
+            cmd.text_data = TextData.from_bytes(data[pos:pos + 1 + length])
+            pos += 1 + length
+
+        return cmd
 
 
 # ---------- 高层业务封装 ----------
 class DevicePayload:
     def __init__(self, ctrl_id: int = 0):
-        self.ctrl_id = ctrl_id
-        self._command = None
+        self.cmd = ControlCmd()
+        self.cmd.ctrl_id = ctrl_id
 
-    @classmethod
-    def from_bytes(cls, data: bytes) -> 'DevicePayload':
-        """静态方法：从字节流解析生成payload实例"""
-        cmd = ControlCmd.from_bytes(data)
-        instance = cls(cmd.ctrl_id)
-        instance._command = cmd
-        return instance
-
-    def build_motor(self, cmd_type: int, left: int, right: int, acc: int) -> 'DevicePayload':
-        if not (0 <= acc <= 100):
-            raise ValueError("Acceleration must be 0-100")
-        self._command = ControlCmd(
-            self.ctrl_id,
-            CtrlType.CTRL_MOTOR,
-            MotorData(cmd_type, left, right, acc)
+    def add_motor_diff(self, linear: int, angular: int, accel: int) -> 'DevicePayload':
+        self.cmd.ctrl_fields |= CtrlField.MOTOR
+        self.cmd.motor_mode = MotorCtrlMode.DIFFERENTIAL
+        self.cmd.motor_data = MotorDiffCtrl(
+            linear_vel=linear,
+            angular_vel=angular,
+            accel=accel
         )
         return self
 
-    def build_servo(self, angle: int) -> 'DevicePayload':
-        self._command = ControlCmd(
-            self.ctrl_id,
-            CtrlType.CTRL_SERVO,
-            ServoData(angle)
+    def add_motor_direct(self, left: int, right: int, accel_l: int, accel_r: int) -> 'DevicePayload':
+        self.cmd.ctrl_fields |= CtrlField.MOTOR
+        self.cmd.motor_mode = MotorCtrlMode.DIRECT
+        self.cmd.motor_data = MotorDirectCtrl(
+            left_speed=left,
+            right_speed=right,
+            left_accel=accel_l,
+            right_accel=accel_r
         )
         return self
 
-    def build_text(self, message: str) -> 'DevicePayload':
-        self._command = ControlCmd(
-            self.ctrl_id,
-            CtrlType.CTRL_TEXT,
-            TextData(message)
-        )
+    def add_servo(self, angle: int, speed: int) -> 'DevicePayload':
+        self.cmd.ctrl_fields |= CtrlField.SERVO
+        self.cmd.servo_data = ServoCtrl(angle, speed)
+        return self
+
+    def add_text(self, message: str) -> 'DevicePayload':
+        self.cmd.ctrl_fields |= CtrlField.TEXT
+        self.cmd.text_data = TextData(message)
         return self
 
     @property
     def raw_bytes(self) -> bytes:
-        return self._command.to_bytes()
-
-    def parse(self) -> Dict[str, Union[str, int, dict]]:
-        """解析为结构化数据（增强版）"""
-        if not self._command:
-            return {"error": "No command loaded"}
-
-        base_info = {
-            "ctrl_id": self.ctrl_id,
-            "ctrl_type": self._command.ctrl_type.name
-        }
-
-        if self._command.ctrl_type == CtrlType.CTRL_MOTOR:
-            return {**base_info, "data": vars(self._command.data)}
-        elif self._command.ctrl_type == CtrlType.CTRL_SERVO:
-            return {**base_info, "angle": self._command.data.angle}
-        elif self._command.ctrl_type == CtrlType.CTRL_TEXT:
-            return {**base_info, "message": self._command.data.message}
-        return {**base_info, "error": "Unknown data type"}
-
-    def get_motor_params(self) -> Optional[dict]:
-        """快速获取电机参数（类型安全访问）"""
-        if self._command and self._command.ctrl_type == CtrlType.CTRL_MOTOR:
-            return {
-                "cmd_type": self._command.data.cmd_type,
-                "left": self._command.data.left,
-                "right": self._command.data.right,
-                "acc": self._command.data.acc
-            }
-        return None
+        return self.cmd.to_bytes()
 
 
 def crc16_ccitt(data):

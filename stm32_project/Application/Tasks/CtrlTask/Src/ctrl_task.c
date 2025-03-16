@@ -18,7 +18,7 @@ static osThreadId_t rawDataReadTaskHandle = NULL;
 // 协议解析处理器
 static protocol_receiver receiver;
 
-static void dispatcher(uint8_t type, const uint8_t* frame_data, uint16_t frame_len);
+static void dispatcher(uint8_t type, const uint8_t* cmd_payload, uint16_t total_len);
 
 static void process_raw_data(const uint8_t* raw_data, uint16_t len);
 
@@ -72,19 +72,20 @@ static void CtrlTask_Execute(void* args)
     }
 }
 
-static void dispatcher(uint8_t type, const uint8_t* frame_data, const uint16_t frame_len)
+static void dispatcher(uint8_t type, const uint8_t* cmd_payload, const uint16_t total_len)
 {
-    if (!validate_control_cmd(frame_data, frame_len))
+    cmd_error_t cmd_error;
+    if (!validate_control_cmd(cmd_payload, total_len, &cmd_error))
     {
-        LOG_ERROR(LOG_MODULE_SYSTEM, "ctrl_cmd_t validation failed");
+        LOG_ERROR(LOG_MODULE_SYSTEM, "ctrl_cmd_t validation failed with error code: %d", cmd_error);
         return;
     }
-    const control_cmd_t* cmd = (const control_cmd_t*)frame_data;
 
-    // Ping Test
-    if (cmd->ctrl_type == CTRL_TEXT)
+    const control_cmd_t* cmd = (const control_cmd_t*)cmd_payload;
+
+    if (is_ctrl_field_set(cmd->ctrl_fields, CTRL_FIELD_TEXT))
     {
-        LOG_INFO(LOG_MODULE_SYSTEM, "Receive debug %.*s\n", cmd->data.text.len, cmd->data.text.msg);
+        LOG_INFO(LOG_MODULE_SYSTEM, "Receive debug %.*s\n", cmd->ping_text.len, cmd->ping_text.msg);
     }
     else
     {

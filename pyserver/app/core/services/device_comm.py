@@ -28,14 +28,15 @@ class DeviceCommunicationService:
             if cmd_type == CommandType.PING:
                 if isinstance(command.payload, PingCommand):
                     ping_cmd = command.payload
-                    payload = DevicePayload().build_text(ping_cmd.echo_message)
+                    payload = DevicePayload().add_text(ping_cmd.message)
                     frame = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value).set_payload(
                         payload).build_frame()
-                    # logger.info(" ".join(f"{byte:02X}" for byte in frame))
+                    logger.info(" ".join(f"{byte:02X}" for byte in frame))
             elif cmd_type == CommandType.SERVO:
                 if isinstance(command.payload, ServoCommand):
                     servo_cmd = command.payload
-                    payload = DevicePayload().build_servo(servo_cmd.angle)
+                    # todo
+                    payload = DevicePayload().add_servo(servo_cmd.angle, servo_cmd.speed)
                     frame = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value).set_payload(
                         payload).build_frame()
                     # logger.info(" ".join(f"{byte:02X}" for byte in frame))

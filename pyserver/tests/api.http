@@ -14,7 +14,8 @@ Content-Type: application/json
 {
   "command_type": "servo",
   "payload": {
-    "angle": 160
+    "angle": 110,
+    "speed": 50
   }
 }
 
@@ -26,6 +27,6 @@ Content-Type: application/json
 {
   "command_type": "ping",
   "payload": {
-    "echo_message": "hello world"
+    "message": "hello world"
   }
 }

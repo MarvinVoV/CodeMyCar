@@ -37,10 +37,10 @@ void servo_task_init(servo_instance_t* servo)
 void servo_task(void* arg)
 {
     servo_instance_t* servo = (servo_instance_t*)arg;
-    control_cmd_t cmd;
+    control_cmd_t *cmd;
 
-    osMessageQueueId_t servoCommandQueue = QueueManager_GetQueueByType(QUEUE_TYPE_SERVO);
-    if (servoCommandQueue == NULL)
+    osMessageQueueId_t commandQueue = QueueManager_GetQueueByType(QUEUE_TYPE_SERVO);
+    if (commandQueue == NULL)
     {
         LOG_ERROR(LOG_MODULE_SERVO, "Failed to get ServoCommandQueue");
         osThreadTerminate(NULL);
@@ -52,9 +52,15 @@ void servo_task(void* arg)
          * 1. 优先处理队列中的新命令（非阻塞模式）
          * 2. 命令抢占: 新命令会立即更新 target_angle，当前运动自动转向新目标
          */
-        if (osMessageQueueGet(servoCommandQueue, &cmd, NULL, 0) == osOK)
+        if (osMessageQueueGet(commandQueue, &cmd, NULL, 0) == osOK)
         {
-            servo_service_exec_cmd(servo, &cmd);
+            // double check
+            if (is_ctrl_field_set(cmd->ctrl_fields, CTRL_FIELD_SERVO))
+            {
+                continue;
+            }
+            servo_service_exec_cmd(servo, cmd);
+            vPortFree(cmd);
         }
 
         // 执行平滑运动更新

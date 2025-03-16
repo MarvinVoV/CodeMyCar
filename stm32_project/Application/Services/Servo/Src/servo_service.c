@@ -39,13 +39,8 @@ void servo_service_init(servo_instance_t* servo)
 // 命令执行函数
 void servo_service_exec_cmd(servo_instance_t* servo, const control_cmd_t* cmd)
 {
-    if (cmd->ctrl_type != CTRL_SERVO)
-    {
-        return;
-    }
-
     // 提取舵机角度
-    const uint8_t angle = cmd->data.servo.angle;
+    const uint8_t angle = cmd->servo.angle;
 
     // 调用舵机设置角度函数
     servo_driver_set_smooth_angle(servo, angle, 15);

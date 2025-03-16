@@ -19,22 +19,23 @@ typedef enum
     QUEUE_TYPE_SYS,           // 系统
     QUEUE_TYPE_UART_RAW_DATA, // UART 原始数据
     QUEUE_TYPE_MAX            // 仅判断
-} queue_type;
+} queue_type_t;
 
 typedef struct
 {
-    queue_type type;
+    queue_type_t type;
     osMessageQueueId_t queue;
 } QueueHandler_t;
+
 
 /**
  * @brief 注册队列管理器
  */
-void QueueManager_RegisterHandler(queue_type type, osMessageQueueId_t queue);
+void QueueManager_RegisterHandler(queue_type_t type, osMessageQueueId_t queue);
 /**
  * @brief 根据类型获取队列
  */
-osMessageQueueId_t QueueManager_GetQueueByType(queue_type type);
+osMessageQueueId_t QueueManager_GetQueueByType(queue_type_t type);
 
 /**
  * 指令分发
