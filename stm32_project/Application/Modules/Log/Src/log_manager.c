@@ -37,7 +37,7 @@ void LogManager_Init(void)
     }
 
     // 注册消息队列到队列管理器
-    QueueManager_RegisterHandler(QUEUE_TYPE_LOG, log_queue);
+    QueueManager_registerHandler(QUEUE_TYPE_LOG, log_queue);
 
     // 初始化日志任务
     LogTask_Init();

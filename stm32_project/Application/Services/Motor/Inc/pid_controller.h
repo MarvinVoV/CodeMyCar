@@ -5,17 +5,20 @@
  *      Author: marvin
  */
 
-#ifndef SERVICES_MOTOR_INC_PIC_CONTROLLER_H_
-#define SERVICES_MOTOR_INC_PIC_CONTROLLER_H_
+#ifndef SERVICES_MOTOR_INC_PID_CONTROLLER_H_
+#define SERVICES_MOTOR_INC_PID_CONTROLLER_H_
+#ifndef CLAMP
+#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
+#endif
 
 typedef struct
 {
-    float Kp;             // 比例系数
-    float Ki;             // 积分系数
-    float Kd;             // 微分系数
-    float integral_limit; // 积分限幅
-    float output_limit;   // 输出限幅 ±100%
-} PIDParams;
+    float kp;           // 比例系数（建议范围：0.1-10.0）
+    float ki;           // 积分系数（建议范围：0.01-2.0）
+    float kd;           // 微分系数（建议范围：0.0-1.0）
+    float integral_max; // 积分限幅（防饱和，建议为output_max的1.2-2倍）
+    float output_max;   // 输出限幅（绝对值不超过该值）
+} PID_Params;
 
 /**
  * PID控制器结构体
@@ -67,8 +70,8 @@ typedef struct
      *
      * 建议通过Ziegler-Nichols方法等调参方法进行参数整定
      */
-    PIDParams params;
-} PIDController;
+    PID_Params params;
+} PID_Controller;
 
 /**
  * @brief 初始化PID控制器
@@ -84,30 +87,21 @@ typedef struct
  * - 参数指针必须有效，否则会导致未定义行为
  * - 初始化后建议设置合理的setpoint值
  */
-void PIDController_Init(PIDController* pid, const PIDParams* params);
-
+void PIDController_Init(PID_Controller* pid, const PID_Params* params);
 /**
- * @brief 执行PID控制计算
+ * @brief 设置PID控制器参数
  * @param pid PID控制器实例指针
- * @param measurement 当前测量值（反馈值），单位与setpoint一致
- * @param delta_time 距离上次计算的时间间隔（单位：秒），必须为正数
- * @return 计算得到的控制量输出，范围由params.output_limit限定
- *
- * @details
- * - 实现离散PID计算公式：
- *   output = Kp*e + Ki*Σe*dt + Kd*(e - e_prev)/dt
- * - 积分项采用抗饱和处理，限制范围由params.integral_limit决定
- * - 微分项基于测量值变化（微分先行），避免设定值突变引起的微分冲击
- *
- * @note
- * - 建议以固定周期调用（如每10ms调用一次）
- * - 当dt接近0时（<1us），返回0输出防止计算异常
- * - 典型调用流程：
- *   1. 读取传感器获得measurement
- *   2. 调用本函数计算控制量
- *   3. 将输出作用于执行器
+ * @param params 新的参数值
  */
-float PIDController_Update(PIDController* pid, float measurement, float delta_time);
+void PID_SetParameters(PID_Controller* pid, const PID_Params* params);
+/**
+ * @brief 执行PID计算
+ * @param pid PID控制器实例指针
+ * @param measurement 当前测量值
+ * @param delta_time 距离上次计算的时间间隔（秒）
+ * @return 计算得到的控制输出值
+ */
+float PID_Calculate(PID_Controller* pid, float measurement, float delta_time);
 
 /**
  * @brief 重置控制器内部状态
@@ -128,6 +122,6 @@ float PIDController_Update(PIDController* pid, float measurement, float delta_ti
  * pid.setpoint = target_value;  // 设置新目标值
  * enable_control();             // 启用控制器
  */
-void PIDController_Reset(PIDController* pid);
+void PID_Reset(PID_Controller* pid);
 
-#endif /* SERVICES_MOTOR_INC_PIC_CONTROLLER_H_ */
+#endif /* SERVICES_MOTOR_INC_PID_CONTROLLER_H_ */

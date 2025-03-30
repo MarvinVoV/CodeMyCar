@@ -33,7 +33,7 @@ void LogTask_Init(void)
  */
 static void LogTask_Execute(void* argument)
 {
-    osMessageQueueId_t log_queue = QueueManager_GetQueueByType(QUEUE_TYPE_LOG);
+    osMessageQueueId_t log_queue = QueueManager_getQueueByType(QUEUE_TYPE_LOG);
     if (log_queue == NULL)
     {
         /*错误处理*/

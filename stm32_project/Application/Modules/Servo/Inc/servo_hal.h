@@ -8,10 +8,16 @@
 #ifndef MODULES_SERVO_INC_SERVO_HAL_H_
 #define MODULES_SERVO_INC_SERVO_HAL_H_
 
-#include "stm32h7xx_hal.h"
 #include <stdbool.h>
-
+#include "stm32h7xx_hal.h"
+#ifndef CLAMP
 #define CLAMP(value, min, max) ((value) < (min) ? (min) : ((value) > (max) ? (max) : (value)))
+#endif
+
+#ifndef SIGN
+#define SIGN(x) ((x > 0) ? 1 : ((x < 0) ? -1 : 0))
+#endif
+
 
 typedef struct
 {
@@ -22,13 +28,13 @@ typedef struct
     uint16_t safety_pulse;      // 新增安全位置
     int min_angle;              // 最小角度
     int max_angle;              // 最大角度
-} servo_hw_config;
+} ServoHardwareConfig;
 
 /**
  * 舵机HAL初始化
  * @param config config
  */
-void servo_hal_init(servo_hw_config* config);
+void ServoHAL_init(ServoHardwareConfig* config);
 
 
 /**
@@ -36,12 +42,11 @@ void servo_hal_init(servo_hw_config* config);
  * @param angle angle
  * @return result
  */
-bool servo_hal_set_angle(int angle);
+bool ServoHAL_setAngle(int angle);
 
 /**
  * 安全停止接口
- * @param config config
  */
-void servo_hal_emergency_stop();
+void ServoHAL_emergencyStop();
 
 #endif /* MODULES_SERVO_INC_SERVO_HAL_H_ */

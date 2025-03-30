@@ -5,16 +5,15 @@
  *      Author: marvin
  */
 
-#include "servo_driver.h"
-
 #include <stdlib.h>
-
 #include "cmsis_os.h"
 #include "servo_hal.h"
+#include "servo_driver.h"
 
 #define ANGLE_DEAD_ZONE 2 // 死区控制
+#define DEFAULT_BASE_DELAY_MS 15
 
-void servo_driver_init(servo_instance_t* servo)
+void ServoDriver_Init(ServoInstance* servo)
 {
     if (servo == NULL) return;
     // 参数默认值
@@ -22,61 +21,79 @@ void servo_driver_init(servo_instance_t* servo)
     if (servo->hw.max_pulse == 0) servo->hw.max_pulse = SERVO_MAX_PULSE;
 
     // 初始化舵机硬件
-    servo_hal_init(&servo->hw);
-    servo->current_angle = 90;
-    servo->target_angle = 90;
+    ServoHAL_init(&servo->hw);
+    servo->currentAngle = 90;
+    servo->targetAngle = 90;
     servo->status = SERVO_IDLE;
-    servo->step_size = 1;   // 默认 1 度
-    servo->base_delay = 15; // 默认速度15ms/度
+    servo->stepSize = 1;                        // 默认 1 度
+    servo->baseDelayMs = DEFAULT_BASE_DELAY_MS; // 默认速度15ms/度
 }
 
 // 带运动控制的设置函数
-void servo_driver_set_smooth_angle(servo_instance_t* servo, int angle, const uint16_t speed_ms)
+void ServoDriver_setSmoothAngle(ServoInstance* servo, int angle, const uint16_t speedMs)
 {
-    if (!servo || abs(servo->current_angle - angle) < ANGLE_DEAD_ZONE)
-    {
-        return; // 小角度不响应
-    }
-
+    if (!servo || servo->status == SERVO_ERROR) return;
     angle = CLAMP(angle, SERVO_ANGLE_MIN, SERVO_ANGLE_MAX);
 
+    // 死区检测
+    if (abs(servo->currentAngle - angle) < ANGLE_DEAD_ZONE)
+    {
+        if (servo->status == SERVO_MOVING)
+        {
+            servo->status = SERVO_IDLE;
+        }
+        return;
+    }
+
+
     // 配置运动参数
-    servo->target_angle = angle;
-    servo->initial_angle = servo->current_angle;
-    servo->base_delay = speed_ms; // 每度移动时间
+    servo->targetAngle = angle;
+    servo->initialAngle = servo->currentAngle;
+    servo->baseDelayMs = MAX(speedMs, 2); // 最小2ms保护
     servo->status = SERVO_MOVING;
 
     // 立即执行第一次更新
-    servo_driver_update_smooth(servo, servo->step_size);
+    ServoDriver_updateSmooth(servo);
 }
 
-// 非阻塞式平滑角度设置 (需在主循环中周期性调用)
-void servo_driver_update_smooth(servo_instance_t* servo, const int step_size)
+void ServoDriver_updateSmooth(ServoInstance* servo)
 {
     if (!servo || servo->status != SERVO_MOVING) return;
 
-    // 单步逼近
-    const int delta = servo->target_angle - servo->current_angle;
+    const int delta = servo->targetAngle - servo->currentAngle;
     if (delta == 0)
     {
         servo->status = SERVO_IDLE;
         return;
     }
 
-    // 动态计算实际步长（不超过剩余角度差）
-    int actual_step = (abs(delta) >= step_size) ? step_size : abs(delta);
-    actual_step *= (delta > 0) ? 1 : -1;
+    // 动态计算步长（最后一步直接到位）
+    const int step = (abs(delta) > servo->stepSize) ? servo->stepSize * SIGN(delta) : delta;
 
-    if (abs(delta) > 0)
+    servo->currentAngle += step;
+    ServoHAL_setAngle(servo->currentAngle);
+
+    // 到达目标后状态更新
+    if (servo->currentAngle == servo->targetAngle)
     {
-        // 逐度逼近
-        servo->current_angle += actual_step;
-        servo_hal_set_angle(servo->current_angle);
-
-        // 到达目标后停止
-        if (servo->current_angle == servo->target_angle)
-        {
-            servo->status = SERVO_IDLE;
-        }
+        servo->status = SERVO_IDLE;
     }
+}
+
+void ServoDriver_setRawAngle(ServoInstance* servo, int angle)
+{
+    if (!servo || servo->status == SERVO_ERROR) return;
+
+    // 角度限幅保护
+    angle = CLAMP(angle, SERVO_ANGLE_MIN, SERVO_ANGLE_MAX);
+
+    // 直接更新目标值和当前值
+    servo->targetAngle = angle;
+    servo->currentAngle = angle;
+
+    // 立即设置硬件角度
+    ServoHAL_setAngle(angle);
+
+    // 状态更新为就绪（无移动过程）
+    servo->status = SERVO_IDLE;
 }

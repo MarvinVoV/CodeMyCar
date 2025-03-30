@@ -6,6 +6,7 @@
  */
 #include "ctrl_task.h"
 
+#include "cmd_process.h"
 #include "log_manager.h"
 #include "pkt_protocol_buf.h"
 #include "queue_manager.h"
@@ -22,11 +23,6 @@ static void dispatcher(uint8_t type, const uint8_t* cmd_payload, uint16_t total_
 
 static void process_raw_data(const uint8_t* raw_data, uint16_t len);
 
-/**
- * @brief 控制任务执行函数
- * @param args args
- */
-static void CtrlTask_Execute(void* args);
 
 void CtrlTask_Init()
 {
@@ -35,7 +31,7 @@ void CtrlTask_Init()
         .stack_size = 512 * 4,
         .priority = (osPriority_t)osPriorityNormal
     };
-    rawDataReadTaskHandle = osThreadNew(CtrlTask_Execute, NULL, &rawDataReadTaskAttrs);
+    rawDataReadTaskHandle = osThreadNew(CtrlTask_doTask, NULL, &rawDataReadTaskAttrs);
     if (rawDataReadTaskHandle == NULL)
     {
         LOG_ERROR(LOG_MODULE_SYSTEM, "Create CtrlTask thread error.");
@@ -49,7 +45,7 @@ void CtrlTask_Init()
     }
 }
 
-static void CtrlTask_Execute(void* args)
+void CtrlTask_doTask(void* args)
 {
     while (1)
     {
@@ -74,23 +70,16 @@ static void CtrlTask_Execute(void* args)
 
 static void dispatcher(uint8_t type, const uint8_t* cmd_payload, const uint16_t total_len)
 {
-    cmd_error_t cmd_error;
-    if (!validate_control_cmd(cmd_payload, total_len, &cmd_error))
+    ControlCmdError cmdError;
+    if (!validateControlCmd(cmd_payload, total_len, &cmdError))
     {
-        LOG_ERROR(LOG_MODULE_SYSTEM, "ctrl_cmd_t validation failed with error code: %d", cmd_error);
+        LOG_ERROR(LOG_MODULE_SYSTEM, "ctrl_cmd_t validation failed with error code: %d", cmdError);
         return;
     }
 
-    const control_cmd_t* cmd = (const control_cmd_t*)cmd_payload;
+    const ControlCmd* cmd = (const ControlCmd*)cmd_payload;
 
-    if (is_ctrl_field_set(cmd->ctrl_fields, CTRL_FIELD_TEXT))
-    {
-        LOG_INFO(LOG_MODULE_SYSTEM, "Receive debug %.*s\n", cmd->ping_text.len, cmd->ping_text.msg);
-    }
-    else
-    {
-        QueueManager_DispatchCommand(cmd);
-    }
+    CmdProcessor_processCommand(cmd);
 }
 
 static void process_raw_data(const uint8_t* raw_data, const uint16_t len)

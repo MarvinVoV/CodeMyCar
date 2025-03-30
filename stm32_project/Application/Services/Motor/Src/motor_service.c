@@ -5,109 +5,230 @@
  *      Author: marvin
  */
 
-#include "motor_service.h"
-
 #include <string.h>
 #include <math.h>
-#include "pic_controller.h"
+#include <stdlib.h>
+#include "motor_service.h"
+#include "pid_controller.h"
 
-#define PI 3.14159265358979323846f
 
-static void calculate_target_rpm(MotionController* motion_controller, float linear, float angular);
+#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
 
-void MotionService_Init(MotionController* motion_controller)
+// 私有函数声明
+/* 私有函数声明 */
+static void CalculateWheelSpeeds(MotionController* ctrl);
+static void UpdateActualStates(MotionController* ctrl, float delta_time);
+static void ApplyControlLogic(MotionController* ctrl, float delta_time);
+static void CheckSystemHealth(MotionController* ctrl);
+
+/* 初始化与配置 */
+void MotionController_init(MotionController* ctrl, MotorDriver* left, MotorDriver* right, const MotionConfig* config)
 {
-    // 初始化电机驱动层
-    Motor_Init(motion_controller->left_motor);
-    Motor_Init(motion_controller->right_motor);
+    if (!ctrl || !left || !right || !config) return;
 
-    // 控制模式初始化
-    motion_controller->target_rpm = 0;
-    motion_controller->target_omega = 0;
+    // 绑定硬件驱动
+    ctrl->left = left;
+    ctrl->right = right;
 
-    // PID初始化
-    const PIDParams default_left_pid = {
-        .Kp = 0.5f, .Ki = 0.1f, .Kd = 0.02f,
-        .integral_limit = 100.0f,
-        .output_limit = 100.0f
+    // 复制配置参数
+    ctrl->config = *config;
+
+    // 初始化状态
+    memset(&ctrl->status, 0, sizeof(MotionStatus));
+    ctrl->status.system.voltage = 12.0f; // 初始电压
+
+
+    // 初始化线速度PID
+    const PID_Params linear_pid_params = {
+        .kp = config->linear_pid.kp,
+        .ki = config->linear_pid.ki,
+        .kd = config->linear_pid.kd,
+        .integral_max = config->linear_pid.integral_max,
+        .output_max = config->linear_pid.output_max
     };
-    const PIDParams default_right_pid = {
-        .Kp = 0.5f, .Ki = 0.1f, .Kd = 0.02f,
-        .integral_limit = 100.0f,
-        .output_limit = 100.0f
+    PIDController_Init(&ctrl->linear_pid, &linear_pid_params);
+    ctrl->linear_pid.setpoint = 0.0f; // 初始目标为0
+
+    // 初始化角速度PID
+    const PID_Params angular_pid_params = {
+        .kp = config->angular_pid.kp,
+        .ki = config->angular_pid.ki,
+        .kd = config->angular_pid.kd,
+        .integral_max = config->angular_pid.integral_max,
+        .output_max = config->angular_pid.output_max
     };
-
-    PIDController_Init(&motion_controller->left_pid, &default_left_pid);
-    PIDController_Init(&motion_controller->right_pid, &default_right_pid);
-    // 运动参数初始化
-    motion_controller->kinematic_params = (KinematicParams){
-        .wheel_base = 0.167f,
-        .wheel_radius = 0.0325f,
-        .max_linear_speed = 1.2f,  // 按额定转速计算值
-        .max_angular_speed = 3.14f // 按π rad/s（180°/s）安全值
-    };
-    motion_controller->emergency_stop = false;
-    memset(motion_controller->status, 0, sizeof(motion_controller->status));
+    PIDController_Init(&ctrl->angular_pid, &angular_pid_params);
+    ctrl->angular_pid.setpoint = 0.0f; // 初始目标为0
 }
 
-
-void MotionService_SetVelocity(MotionController* motion_controller, float linear, float angular)
+/* 设置目标速度 */
+void MotionController_setVelocity(MotionController* ctrl, const float linear, const float angular)
 {
-    if (motion_controller->emergency_stop) return;
+    if (!ctrl || ctrl->status.system.error_code) return;
 
-    // 速度限幅
-    linear = fmaxf(-motion_controller->kinematic_params.max_linear_speed,
-                   fminf(linear, motion_controller->kinematic_params.max_linear_speed));
-    angular = fmaxf(-motion_controller->kinematic_params.max_angular_speed,
-                    fminf(angular, motion_controller->kinematic_params.max_angular_speed));
+    // 参数限幅
+    ctrl->status.target.linear_speed = CLAMP(linear,
+                                             -ctrl->config.max_linear_speed,
+                                             ctrl->config.max_linear_speed);
 
-    // 计算目标转速
-    calculate_target_rpm(motion_controller, linear, angular);
+    ctrl->status.target.angular_speed = CLAMP(angular,
+                                              -ctrl->config.max_angular_speed,
+                                              ctrl->config.max_angular_speed);
+
+    // 更新PID目标值
+    ctrl->linear_pid.setpoint = ctrl->status.target.linear_speed;
+    ctrl->angular_pid.setpoint = ctrl->status.target.angular_speed;
+
+    // 计算电机目标转速
+    CalculateWheelSpeeds(ctrl);
 }
 
-void MotionService_EmergencyStop(MotionController* motion_controller)
+/* 紧急停止 */
+void MotionController_emergencyStop(MotionController* ctrl)
 {
-    motion_controller->emergency_stop = true;
+    if (!ctrl) return;
 
-    // 立即停止电机
-    Motor_SetSpeed(motion_controller->left_motor, 0);
-    Motor_SetSpeed(motion_controller->right_motor, 0);
+    PID_Reset(&ctrl->linear_pid);
+    PID_Reset(&ctrl->angular_pid);
 
-    // 重置PID状态
-    PIDController_Reset(&motion_controller->left_pid);
-    PIDController_Reset(&motion_controller->right_pid);
+    // 设置错误标志位
+    ctrl->status.system.error_code |= 0x80000000; // 最高位表示急停
+
+    // 停止电机输出
+    Motor_EmergencyStop(ctrl->left);
+    Motor_EmergencyStop(ctrl->right);
 }
 
-const MotorStatus* MotionService_GetStatus(MotionController* motion_controller, int motor_id)
+/* 状态更新 */
+void MotionController_Update(MotionController* ctrl, const float delta_time)
 {
-    if (motor_id < 0 || motor_id > 1) return NULL;
-    // 电流检测需要硬件支持，此处留空
-    return &motion_controller->status[motor_id];
+    if (!ctrl || delta_time <= 0.0f) return;
+
+    // 1. 安全检测
+    CheckSystemHealth(ctrl);
+
+    // 2. 更新底层驱动状态
+    Motor_Update(ctrl->left);
+    Motor_Update(ctrl->right);
+
+    // 3. 计算实际运动状态
+    UpdateActualStates(ctrl, delta_time);
+
+    // 4. 闭环控制逻辑
+    if (!(ctrl->status.system.error_code & 0x80000000))
+    {
+        ApplyControlLogic(ctrl, delta_time);
+    }
 }
 
-
-static void calculate_target_rpm(MotionController* motion_controller, const float linear, const float angular)
+/* 获取状态 */
+MotionStatus* MotionController_getStatus(MotionController* ctrl)
 {
-    // 差速运动学计算
-    const float linear_left = linear - angular * motion_controller->kinematic_params.wheel_base / 2;
-    const float linear_right = linear + angular * motion_controller->kinematic_params.wheel_base / 2;
-
-    // 转换为RPM：RPM = (线速度 m/s * 60) / (2π * 轮半径)
-    const float rpm_left = (linear_left * 60) /
-        (2 * PI * motion_controller->kinematic_params.wheel_radius);
-    const float rpm_right = (linear_right * 60) /
-        (2 * PI * motion_controller->kinematic_params.wheel_radius);
-
-    // 设置目标转速（注意符号方向）
-    motion_controller->target_rpm = rpm_left; // 根据实际电机转向调整
-    motion_controller->status[MOTOR_LEFT].current_rpm = rpm_left;
-    motion_controller->status[MOTOR_RIGHT].current_rpm = rpm_right;
+    return ctrl ? &ctrl->status : NULL;
 }
 
-// 私有函数实现
-void MotionService_UpdateMotorStatu(const Motor* motor, MotorStatus* status)
+/******************** 静态函数实现 ********************/
+
+/* 计算轮速目标值 */
+static void CalculateWheelSpeeds(MotionController* ctrl)
 {
-    status->current_rpm = (float)motor->rpm;
-    status->total_pulses = motor->total_pulses;
-    // 电流检测需要硬件支持，此处留空
+    const float L = ctrl->config.wheel_base;
+    const float R = ctrl->config.wheel_radius;
+
+    // 差速计算
+    const float v_left = ctrl->status.target.linear_speed - (L / 2) * ctrl->status.target.angular_speed;
+    const float v_right = ctrl->status.target.linear_speed + (L / 2) * ctrl->status.target.angular_speed;
+
+    // 转换为RPM
+    const float left_rpm = (float)(v_left / (2 * M_PI * R)) * 60.0f;
+    const float right_rpm = (float)(v_right / (2 * M_PI * R)) * 60.0f;
+
+    // 设置电机目标
+    Motor_SetTargetRPM(ctrl->left, left_rpm);
+    Motor_SetTargetRPM(ctrl->right, right_rpm);
+}
+
+/* 更新实际状态 */
+static void UpdateActualStates(MotionController* ctrl, const float delta_time)
+{
+    // 获取电机实际转速
+    const float left_rpm = ctrl->left->state.rpm;
+    const float right_rpm = ctrl->right->state.rpm;
+    const float R = ctrl->config.wheel_radius;
+    const float L = ctrl->config.wheel_base;
+
+    // 计算实际线速度
+    ctrl->status.actual.linear_speed =
+        (left_rpm + right_rpm) * (2.0f * (float)M_PI * R) / 120.0f;
+
+    // 计算实际角速度
+    ctrl->status.actual.angular_speed =
+        (right_rpm - left_rpm) * (2.0f * (float)M_PI * R) / (L * 60.0f);
+
+    // 更新累计里程
+    ctrl->status.actual.odometer += fabsf(ctrl->status.actual.linear_speed) * delta_time;
+
+    // 同步系统状态
+    // ctrl->status.system.voltage = SafetyMonitor_GetVoltage();
+}
+
+/* 应用控制算法 */
+static void ApplyControlLogic(MotionController* ctrl, const float delta_time)
+{
+    // ================ 1. 计算线速度PID输出 ================
+    const float linear_output = PID_Calculate(
+        &ctrl->linear_pid,
+        ctrl->status.actual.linear_speed, // 当前实际线速度作为测量值
+        delta_time
+    );
+
+    // ================ 2. 计算角速度PID输出 ================
+    const float angular_output = PID_Calculate(
+        &ctrl->angular_pid,
+        ctrl->status.actual.angular_speed, // 当前实际角速度作为测量值
+        delta_time
+    );
+
+    // ================ 3. 合成新的目标速度 ================
+    const float new_linear = ctrl->status.target.linear_speed + linear_output;
+    const float new_angular = ctrl->status.target.angular_speed + angular_output;
+
+    // ================ 4. 目标速度限幅 ================
+    ctrl->status.target.linear_speed = CLAMP(new_linear,
+        -ctrl->config.max_linear_speed,
+        ctrl->config.max_linear_speed
+    );
+    ctrl->status.target.angular_speed = CLAMP(new_angular,
+        -ctrl->config.max_angular_speed,
+        ctrl->config.max_angular_speed
+    );
+
+    // ================ 5. 转换为轮速目标 ================
+    CalculateWheelSpeeds(ctrl);
+}
+
+/* 系统健康检查 */
+static void CheckSystemHealth(MotionController* ctrl)
+{
+    uint32_t errors = 0;
+
+    // 聚合电机错误
+    if (ctrl->left->state.error_code) errors |= 0x01;
+    if (ctrl->right->state.error_code) errors |= 0x02;
+
+    // 电压检测
+    if (ctrl->status.system.voltage < 10.5f) errors |= 0x04;
+    if (ctrl->status.system.voltage > 14.5f) errors |= 0x08;
+
+    // 温度检测
+    if (ctrl->status.system.temperature > 85.0f) errors |= 0x10;
+
+    // 更新错误码（保留最高位为急停标志）
+    ctrl->status.system.error_code = (ctrl->status.system.error_code & 0x80000000) | errors;
+
+    // 触发急停条件
+    if (errors != 0)
+    {
+        MotionController_emergencyStop(ctrl);
+    }
 }

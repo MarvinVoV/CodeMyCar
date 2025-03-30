@@ -40,8 +40,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-servo_instance_t servo_instance;
-Motor motor;
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -193,39 +192,39 @@ int main(void)
 
     /*初始化控制任务*/
     CtrlTask_Init();
-
-    // 舵机初始化
-    const servo_hw_config servo_hw_config = {
-        .pwm_tim = &htim2,
-        .channel = TIM_CHANNEL_1,
-        .min_pulse = 500,
-        .max_pulse = 2500,
-        .min_angle = 0,
-        .max_angle = 180
-    };
-    servo_instance.hw = servo_hw_config;
-    servo_service_init(&servo_instance);
-
-    // 初始化motor 模块
-    motor.encoder_res = 13; // 编码器线数13ppr
-    motor.gear_ratio = 30; // 减速比30:1
-    motor.pwm_tim = &htim3; // pwm 定时器
-    motor.encoder_tim = &htim4; // 编码器定时器
-    motor.hal= (HAL_MotorConfig){
-        .pwm_tim = &htim3,
-        .pwm_ch = TIM_CHANNEL_1, // TIM3的CH1（PA6)
-
-        .encode_tim = &htim4, // 编码器定时器句柄
-        .encode_ch_a = TIM_CHANNEL_1, // TIM4的CH1（PD12) 接编码器A相
-        .encode_ch_b = TIM_CHANNEL_2, // TIM4的CH2（PD13）接编码器B相
-
-        .in1_port = GPIOF,
-        .in1_pin = GPIO_PIN_7, //  IN1控制引脚GPIO端口 - 通常用于电机正转控制
-        .in2_port = GPIOF,
-        .in2_pin = GPIO_PIN_8  //  IN2控制引脚GPIO端口 - 通常用于电机反转控制
-    };
-    Motor_Init(&motor);
-    Motor_SetSpeed(&motor, 50);
+    //
+    // // 舵机初始化
+    // const servo_hw_config servo_hw_config = {
+    //     .pwm_tim = &htim2,
+    //     .channel = TIM_CHANNEL_1,
+    //     .min_pulse = 500,
+    //     .max_pulse = 2500,
+    //     .min_angle = 0,
+    //     .max_angle = 180
+    // };
+    // servo_instance.hw = servo_hw_config;
+    // servo_service_init(&servo_instance);
+    //
+    // // 初始化motor 模块
+    // motor.encoder_res = 13; // 编码器线数13ppr
+    // motor.gear_ratio = 30; // 减速比30:1
+    // motor.pwm_tim = &htim3; // pwm 定时器
+    // motor.encoder_tim = &htim4; // 编码器定时器
+    // motor.hal= (HAL_MotorConfig){
+    //     .pwm_tim = &htim3,
+    //     .pwm_ch = TIM_CHANNEL_1, // TIM3的CH1（PA6)
+    //
+    //     .encode_tim = &htim4, // 编码器定时器句柄
+    //     .encode_ch_a = TIM_CHANNEL_1, // TIM4的CH1（PD12) 接编码器A相
+    //     .encode_ch_b = TIM_CHANNEL_2, // TIM4的CH2（PD13）接编码器B相
+    //
+    //     .in1_port = GPIOF,
+    //     .in1_pin = GPIO_PIN_7, //  IN1控制引脚GPIO端口 - 通常用于电机正转控制
+    //     .in2_port = GPIOF,
+    //     .in2_pin = GPIO_PIN_8  //  IN2控制引脚GPIO端口 - 通常用于电机反转控制
+    // };
+    // Motor_Init(&motor);
+    // Motor_SetSpeed(&motor, 50);
 
 
   /* USER CODE END RTOS_THREADS */

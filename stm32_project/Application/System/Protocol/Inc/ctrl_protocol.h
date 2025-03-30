@@ -9,83 +9,89 @@
 #define SYSTEM_PROTOCOL_INC_CTRL_PROTOCOL_H_
 
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
+
+// 使用Q格式定点数优化
+#define Q_SCALE 1000  // 3位小数精度
 
 #pragma pack(push, 1)
 
-// ================ 控制字段位掩码定义 ================
+/*---------------------- 控制掩码定义 ----------------------*/
 typedef enum
 {
-    CTRL_FIELD_MOTOR = (1 << 0), // 电机控制有效
-    CTRL_FIELD_SERVO = (1 << 1), // 舵机控制有效
-    CTRL_FIELD_TEXT = (1 << 7)   // 调试信息有效
-} ctrl_field_t;
+    CTRL_FIELD_MOTION = (1 << 0), // 运动控制有效
+    CTRL_FIELD_TEXT = (1 << 7)    // 调试信息有效
+} CtrlField;
 
-// ========= Motor 控制指令相关结构体 ========
-// 控制模
+
+/*---------------------- 高层运动控制定义 ----------------------*/
 typedef enum
 {
-    CTRL_MODE_DIFFERENTIAL = 0x01, // 差速模式（高层控制）
-    CTRL_MODE_DIRECT = 0x02,       // 直接控制模式（底层控制）
-    CTRL_MODE_EMERGENCY = 0x80     // 紧急模式（最高优先级）
-} motor_ctrl_mode_t;
+    MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
+    MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
+    MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
+    MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
+    MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
+    MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
+} MotionCtrlMode;
 
-// 差速控制参数
+// 运动学控制参数
 typedef struct
 {
-    int16_t linear_vel;  // 线速度（-3000~3000 mm/s）
-    int16_t angular_vel; // 角速度（-1800~1800 0.1°/s）
-    uint8_t accel;       // 加速度（0-100%）
-} motor_diff_ctrl_t;
+    int16_t linear_vel;  // 线速度  Q16.15格式（m/s） 前向为正
+    int16_t angular_vel; // 角速度 Q16.15格式（rad/s） 逆时针为正
+    int16_t steer_angle; // 前轮转角 Q8.7格式（-90.00~+90.00）
+    int16_t curvature;   // 路径曲率 (1/m) [可选]
+} KinematicParam;
 
 // 直接控制参数
 typedef struct
 {
-    int16_t left_speed;  // 左电机速度（-1000~1000）
-    int16_t right_speed; // 右电机速度（-1000~1000）
-    uint8_t left_accel;  // 左加速度（0-100%）
-    uint8_t right_accel; // 右加速度（0-100%）
-} motor_direct_ctrl_t;
+    int16_t steer_angle; // 舵机角度 (0-180)
+    int16_t left_speed;  // 左电机速度 m/s
+    int16_t right_speed; // 右电机速度 m/s
+} DirectCtrlParam;
 
-// 控制参数联合体
-typedef union
-{
-    motor_diff_ctrl_t diff;     // 差速模式参数
-    motor_direct_ctrl_t direct; // 直接控制参数
-    // 紧急模式无需payload
-} motor_motion_t;
-
-// 控制指令结构体
 typedef struct
 {
-    motor_ctrl_mode_t mode; // 控制模式 @see motor_ctrl_mode_t
-    motor_motion_t motion;  // 控制参数
-} motor_ctrl_t;
+    float angular_vel; // rad/s
+    uint8_t direction; // 0:CCW, 1:CW
+    float radius;      // 旋转半径（0=原地）
+} SpinParam;
 
-// ========= Servo 控制指令相关结构体 ========
+
+// 运动控制主指令
 typedef struct
 {
-    uint8_t angle; // 目标角度（0~180）
-    uint8_t speed; // 转向速度（0-100%）
-} servo_ctrl_t;
+    MotionCtrlMode mode; // 运动模式
+    union
+    {
+        KinematicParam kinematic;
+        DirectCtrlParam direct;
+        SpinParam spin;
+    } params;
+
+    uint16_t duration; // 执行持续时间（ms）
+} MotionCmd;
 
 
-// ========= Debug相关结构体 ========
+/*---------------------- 独立设备控制指令 ----------------------*/
+
 typedef struct
 {
     uint8_t len;   // 文本长度
     uint8_t msg[]; // 柔性数组（C99特性）
-} ping_text_t;
+} PingText;
 
+
+/*---------------------- 主控制指令 ----------------------*/
 typedef struct
 {
-    uint8_t ctrl_id;       // 控制器ID
-    uint8_t ctrl_fields;   // 控制字段（位掩码组合） @see ctrl_field_t
-    servo_ctrl_t servo;    // 舵机控制参数
-    motor_ctrl_t motor;    // 电机控制参数
-    ping_text_t ping_text; // 调试信息
-} control_cmd_t;
+    uint8_t ctrl_id;   // 控制器ID
+    uint8_t fields;    // 控制字段（位掩码组合）
+    MotionCmd motion;  // 运动控制参数
+    PingText pingText; // 调试信息 debug
+} ControlCmd;
 #pragma pack(pop)
 
 
@@ -100,7 +106,7 @@ typedef enum
     CMD_ERR_SERVO_PARAM,        // 舵机参数越界
     CMD_ERR_TEXT_LENGTH,        // 文本长度不合法
     CMD_ERR_FIELD_CONFLICT      // 字段冲突
-} cmd_error_t;
+} ControlCmdError;
 
 
 /**
@@ -109,32 +115,24 @@ typedef enum
  * @param field 要检查的字段掩码
  * @return 包含返回true，否则false
  */
-bool is_ctrl_field_set(uint8_t fields, ctrl_field_t field);
+bool isCtrlFieldSet(uint8_t fields, CtrlField field);
 
 /**
  * @brief 检查是否同时包含多个控制字段
  * @param fields 当前控制字段掩码
- * @param check_fields 要检查的字段掩码组合
+ * @param checkFields 要检查的字段掩码组合
  * @return 全部包含返回true，否则false
  */
-bool are_ctrl_fields_set(uint8_t fields, uint8_t check_fields);
+bool isCtrlFieldsSet(uint8_t fields, uint8_t checkFields);
 
-/**
- * @brief 将控制字段转换为可读字符串
- * @param fields 控制字段掩码
- * @param buf 输出缓冲区
- * @param buf_size 缓冲区大小
- * @return 生成的字符串
- */
-const char* ctrl_fields_to_str(uint8_t fields, char* buf, size_t buf_size);
 
 /**
  * @brief 校验控制指令的完整性
- * @param cmd_payload 指令指针
- * @param total_len 接收到的数据总长度
- * @param out_err 输出详细错误码
+ * @param cmdPayload 指令指针
+ * @param totalLen 接收到的数据总长度
+ * @param error 输出详细错误码
  * @return 是否合法
  */
-bool validate_control_cmd(const uint8_t* cmd_payload, uint16_t total_len, cmd_error_t* out_err);
+bool validateControlCmd(const uint8_t* cmdPayload, uint16_t totalLen, ControlCmdError* error);
 
 #endif /* SYSTEM_PROTOCOL_INC_CTRL_PROTOCOL_H_ */

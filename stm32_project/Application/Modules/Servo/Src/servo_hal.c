@@ -9,9 +9,9 @@
 #include "log_manager.h"
 
 
-static servo_hw_config serv_config; // 静态存储配置副本
+static ServoHardwareConfig serv_config; // 静态存储配置副本
 
-void servo_hal_init(servo_hw_config* config)
+void ServoHAL_init(ServoHardwareConfig* config)
 {
     if (config == NULL || config->pwm_tim == NULL)
     {
@@ -38,10 +38,10 @@ void servo_hal_init(servo_hw_config* config)
         LOG_ERROR(LOG_MODULE_SERVO, "PWM start failed");
         return;
     }
-    memcpy(&serv_config, config, sizeof(servo_hw_config)); // 拷贝配置
+    memcpy(&serv_config, config, sizeof(ServoHardwareConfig)); // 拷贝配置
 }
 
-bool servo_hal_set_angle(int angle)
+bool ServoHAL_setAngle(int angle)
 {
     const int32_t pulse_range = serv_config.max_pulse - serv_config.min_pulse;
     angle = CLAMP(angle, serv_config.min_angle, serv_config.max_angle);
@@ -72,7 +72,7 @@ bool servo_hal_set_angle(int angle)
     return true;
 }
 
-void servo_hal_emergency_stop()
+void ServoHAL_emergencyStop()
 {
     __HAL_TIM_SET_COMPARE(serv_config.pwm_tim, serv_config.channel, serv_config.safety_pulse);
 }

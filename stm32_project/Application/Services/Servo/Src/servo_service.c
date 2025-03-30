@@ -8,40 +8,78 @@
 
 #include "cmsis_os.h"
 #include "log_manager.h"
-#include "queue_manager.h"
 #include "servo_task.h"
 
-#define SERVO_QUEUE_SIZE 10  // 定义队列大小
 
-static osMessageQueueId_t servoCommandQueue = NULL;
 
-// 初始化函数
-void servo_service_init(servo_instance_t* servo)
+void ServoService_Init(ServoService* service, ServoInstance* driver)
 {
+    const ServoServiceConfig config = {
+        .smooth_step = 2,
+        .update_interval = 5 // ms
+    };
+    service->driver = driver;
+    service->config = config;
+    service->target_angle = driver->currentAngle;
+    service->current_angle = driver->currentAngle;
+    service->last_update = HAL_GetTick();
+
     // 调用驱动层初始化函数
-    servo_driver_init(servo);
-
-    // 创建消息队列
-    servoCommandQueue = osMessageQueueNew(SERVO_QUEUE_SIZE, sizeof(control_cmd_t), NULL);
-    if (servoCommandQueue == NULL)
-    {
-        LOG_ERROR(LOG_MODULE_SERVO, "Failed to create servo command queue");
-        return;
-    }
-
-    // 注册队列到queue_manager
-    QueueManager_RegisterHandler(QUEUE_TYPE_SERVO, servoCommandQueue);
+    ServoDriver_Init(driver);
 
     // 创建任务
-    servo_task_init(servo);
+    ServoTask_init(service);
 }
 
-// 命令执行函数
-void servo_service_exec_cmd(servo_instance_t* servo, const control_cmd_t* cmd)
+void ServoService_SetAngle(ServoService* service, int angle, uint16_t speed_ms)
 {
-    // 提取舵机角度
-    const uint8_t angle = cmd->servo.angle;
+    // 角度限幅
+    angle = MAX(MIN(angle, service->driver->hw.max_angle), service->driver->hw.min_angle);
 
-    // 调用舵机设置角度函数
-    servo_driver_set_smooth_angle(servo, angle, 15);
+    // 计算步进参数
+    int step = service->config.smooth_step;
+    if (speed_ms > 0)
+    {
+        step = (speed_ms * 1000) / service->config.update_interval; // 根据速度计算步长
+    }
+
+    // 更新目标状态
+    service->target_angle = angle;
+    service->driver->stepSize = step;
+    service->driver->baseDelayMs = service->config.update_interval;
+}
+
+int ServoService_Update(ServoService* service)
+{
+    uint32_t now = HAL_GetTick();
+    if (now - service->last_update < service->config.update_interval)
+    {
+        return service->current_angle;
+    }
+
+    // 计算角度差值
+    int delta = service->target_angle - service->current_angle;
+
+    if (delta != 0)
+    {
+        // 计算步进
+        int step = service->driver->stepSize;
+        step = (delta > 0) ? MIN(step, delta) : MAX(-step, delta);
+
+        // 更新当前角度
+        service->current_angle += step;
+
+        // 调用驱动层实际设置角度
+        ServoDriver_setRawAngle(service->driver, service->current_angle);
+    }
+
+    service->last_update = now;
+    return service->current_angle;
+}
+
+void ServoService_SetAngleImmediate(ServoService* service, int angle)
+{
+    service->target_angle = angle;
+    service->current_angle = angle;
+    ServoDriver_setRawAngle(service->driver, angle); // 直接调用驱动层
 }

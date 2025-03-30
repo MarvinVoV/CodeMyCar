@@ -17,39 +17,48 @@
 #define SERVO_ANGLE_MIN 0     // 最小角度 (0°)
 #define SERVO_ANGLE_MAX 180   // 最大角度 (180°)
 
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
 typedef enum
 {
     SERVO_IDLE,
     SERVO_MOVING,
     SERVO_ERROR
-} servo_status_t;
+} ServoStatus;
 
 
 typedef struct
 {
-    servo_hw_config hw;    // 硬件配置
-    int target_angle;      // 目标角度
-    int current_angle;     // 当前角度(运动过程中)
-    int initial_angle;     // 记录运动起始角度
-    servo_status_t status; // 状态
-    int step_size;         // 步长 默认 1 度
-    uint16_t base_delay;   // 基准延时ms (建议5-20ms)
-    uint32_t last_update;  // 上次更新时间
-} servo_instance_t;
+    ServoHardwareConfig hw; // 硬件配置
+    int targetAngle;        // 目标角度
+    int currentAngle;       // 当前角度(运动过程中)
+    int initialAngle;       // 记录运动起始角度
+    ServoStatus status;     // 状态
+    int stepSize;           // 步长 默认 1 度
+    uint16_t baseDelayMs;   // 基准延时ms (建议5-20ms)
+    uint32_t lastUpdate;    // 上次更新时间
+} ServoInstance;
 
 /**
  * 初始化
  * @param servo servo
  */
-void servo_driver_init(servo_instance_t* servo);
+void ServoDriver_Init(ServoInstance* servo);
 /**
  * 设置目标角度
  * @param servo servo
  * @param angle target angle
- * @param speed_ms speed ms
+ * @param speedMs speed ms
  */
-void servo_driver_set_smooth_angle(servo_instance_t* servo, int angle, uint16_t speed_ms);
+void ServoDriver_setSmoothAngle(ServoInstance* servo, int angle, uint16_t speedMs);
 
-void servo_driver_update_smooth(servo_instance_t* servo, int step_size);
+void ServoDriver_updateSmooth(ServoInstance* servo);
+
+/**
+ * @brief 直接设置舵机角度（立即生效，无平滑过程）
+ * @param servo 舵机实例指针
+ * @param angle 目标角度（SERVO_ANGLE_MIN~SERVO_ANGLE_MAX）
+ */
+void ServoDriver_setRawAngle(ServoInstance* servo, int angle);
 
 #endif /* MODULES_SERVO_INC_SERVO_DRIVER_H_ */
