@@ -11,75 +11,125 @@
 #include "servo_task.h"
 
 
-
-void ServoService_Init(ServoService* service, ServoInstance* driver)
+void ServoService_init(ServoInstance* instance)
 {
-    const ServoServiceConfig config = {
-        .smooth_step = 2,
-        .update_interval = 5 // ms
-    };
-    service->driver = driver;
-    service->config = config;
-    service->target_angle = driver->currentAngle;
-    service->current_angle = driver->currentAngle;
-    service->last_update = HAL_GetTick();
+    if (instance == NULL || instance->driver == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid instance or driver");
+        return;
+    }
+
+    if (instance->config == NULL)
+    {
+        if (instance->config == NULL)
+        {
+            static InstanceConfig defaultConfig = {
+                .minAngle = 0,
+                .maxAngle = 180,
+                .smoothStep = 2,
+                .updateInterval = 5,
+                .baseDelayMs = 10,
+                .deadZone = 2
+            };
+            instance->config = &defaultConfig;
+        }
+    }
+
+    instance->driver->hw->minAngle = instance->config->minAngle;
+    instance->driver->hw->maxAngle = instance->config->maxAngle;
 
     // 调用驱动层初始化函数
-    ServoDriver_Init(driver);
+    ServoDriver_Init(instance->driver);
 
     // 创建任务
-    ServoTask_init(service);
+    ServoTask_init(instance);
 }
 
-void ServoService_SetAngle(ServoService* service, int angle, uint16_t speed_ms)
+void ServoService_setAngleSmoothly(ServoInstance* instance, const int angle, uint16_t speedMs)
 {
+    if (!instance || !instance->driver) return;
     // 角度限幅
-    angle = MAX(MIN(angle, service->driver->hw.max_angle), service->driver->hw.min_angle);
+    const int targetAngle = CLAMP(angle, instance->config->minAngle, instance->config->maxAngle);
 
-    // 计算步进参数
-    int step = service->config.smooth_step;
-    if (speed_ms > 0)
+    // 角度未发生变化，直接返回
+    if (instance->currentAngle == targetAngle) return;
+
+    // 死区检测
+    const int delta = abs(targetAngle - instance->currentAngle);
+    if (delta <= instance->config->deadZone)
     {
-        step = (speed_ms * 1000) / service->config.update_interval; // 根据速度计算步长
+        if (instance->targetAngle != instance->currentAngle)
+        {
+            // 若之前处于移动状态，需要同步目标值
+            instance->targetAngle = instance->currentAngle;
+        }
+        return;
     }
+    if (speedMs > 0)
+    {
+        speedMs = SERVO_DEFAULT_SPEED_MS;
+    }
+
+    // 计算动态步长（速度越快步长越大）
+    const int smoothStep = instance->config->smoothStep;
+    const uint16_t updateInterval = instance->config->updateInterval;
+
+    // 动态步长计算
+    const uint32_t totalTime = delta * speedMs;
+    const uint32_t cycleCount = totalTime / updateInterval;
+    instance->stepSize = (cycleCount > 0) ? (int)ceil((double)delta / cycleCount) : smoothStep;
+
+    // 步长保护:不超过smoothStep且不小于1
+    instance->stepSize = CLAMP(instance->stepSize, 1, instance->config->smoothStep);
+
 
     // 更新目标状态
-    service->target_angle = angle;
-    service->driver->stepSize = step;
-    service->driver->baseDelayMs = service->config.update_interval;
+    instance->targetAngle = targetAngle;
+    instance->initAngle = instance->currentAngle;
+
+    // 立即更新一次
+    ServoService_update(instance);
 }
 
-int ServoService_Update(ServoService* service)
+int ServoService_update(ServoInstance* instance)
 {
-    uint32_t now = HAL_GetTick();
-    if (now - service->last_update < service->config.update_interval)
+    if (!instance || !instance->driver) return -1;
+
+    const uint32_t now = HAL_GetTick();
+    const uint32_t lastUpdate = instance->lastUpdate;
+    const uint16_t updateInterval = instance->config->updateInterval;
+
+    if ((now - lastUpdate) < updateInterval)
     {
-        return service->current_angle;
+        return instance->currentAngle;
+    }
+    instance->lastUpdate = now;
+
+    // 到达目标
+    if (instance->currentAngle == instance->targetAngle)
+    {
+        return instance->currentAngle;
     }
 
-    // 计算角度差值
-    int delta = service->target_angle - service->current_angle;
+    // 计算移动方向和步长
+    const int delta = instance->targetAngle - instance->currentAngle;
+    const int direction = (delta > 0) ? 1 : -1;
+    const int step = abs(delta) > instance->stepSize ? instance->stepSize * direction : delta;
+    instance->currentAngle += step;
 
-    if (delta != 0)
-    {
-        // 计算步进
-        int step = service->driver->stepSize;
-        step = (delta > 0) ? MIN(step, delta) : MAX(-step, delta);
-
-        // 更新当前角度
-        service->current_angle += step;
-
-        // 调用驱动层实际设置角度
-        ServoDriver_setRawAngle(service->driver, service->current_angle);
-    }
-
-    service->last_update = now;
-    return service->current_angle;
+    ServoDriver_setAngle(instance->driver, instance->currentAngle);
+    return instance->currentAngle;
 }
 
-void ServoService_SetAngleImmediate(ServoService* service, int angle)
+void ServoService_setAngleImmediate(ServoInstance* instance, const int angle)
 {
-    service->target_angle = angle;
-    service->current_angle = angle;
-    ServoDriver_setRawAngle(service->driver, angle); // 直接调用驱动层
+    if (!instance || !instance->driver) return;
+    // 角度限幅
+    const int targetAngle = CLAMP(angle, instance->config->minAngle, instance->config->maxAngle);
+    // 直接更新所有状态
+    instance->targetAngle = targetAngle;
+    instance->currentAngle = targetAngle;
+    instance->initAngle = targetAngle;
+
+    ServoDriver_setAngle(instance->driver, instance->currentAngle);
 }

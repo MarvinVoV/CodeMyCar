@@ -11,257 +11,331 @@
 #include "motor_driver.h"
 #include "log_manager.h"
 
-static float calculate_rpm(const MotorDriver* driver, int32_t delta_pulses, float delta_time);
+static float rpmToRadps(float rpm);
+static float radpsToRpm(float radps);
+static float radpsToMps(float radps, float wheelRadiusMM);
+static float pulseToRad(int32_t pulses, float encoderPPR, float gearRatio);
+static void updateRevolutions(MotorState* state, int32_t deltaPulses, float encoderPPR, float gearRatio);
+static float applySpeedFilter(MotorDriver* driver, float rawSpeed);
 
+/**
+ * @brief 将转速从转每分钟（RPM）转换为弧度每秒（rad/s）
+ *
+ * @param rpm 电机输出轴转速值，单位：转/分钟（Revolutions Per Minute）
+ *           物理意义：电机输出轴（减速后）的每分钟转数
+ * @return float 电机输出轴角速度值，单位：弧度/秒（rad/s）
+ *
+ * @note 转换公式：
+ * rad/s = (RPM × 2π) / 60
+ */
+static float rpmToRadps(const float rpm)
+{
+    return (rpm * 2.0f * (float)M_PI) / 60.0f;
+}
 
-static uint32_t calculate_pulse(double duty, const TIM_HandleTypeDef* pwm_tim);
-static void update_speed_filter(MotorDriver* driver, float new_speed);
-static float apply_pid_control(MotorDriver* driver, float current_rpm, float delta_time);
+/**
+ * @brief 将输出轴的角速度（rad/s）转换为输出轴的转速（RPM）
+ *
+ * @param radps 输出轴角速度，单位：弧度/秒（rad/s）
+ * @return float 输出轴转速，单位：转/分钟（RPM）
+ *
+ * @note 公式：
+ * RPM = (radps × 60) / (2π)
+ * 示例：当 radps = 10.472 rad/s（≈ 100 RPM）时：
+ * (10.472 × 60) / 6.283 ≈ 100 RPM
+ */
+static float radpsToRpm(const float radps)
+{
+    return (radps * 60.0f) / (2.0f * (float)M_PI);
+}
 
-void Motor_Init(MotorDriver* driver, HAL_MotorConfig* hal_cfg, const MotorSpec* spec)
+/**
+ * @brief 将角速度转换为线速度
+ *
+ * @param radps 角速度值，单位：弧度/秒（rad/s）
+ * @param wheelRadiusMM 轮子半径，单位：毫米（mm）
+ * @return float 线速度值，单位：米/秒（m/s）
+ *
+ * @note 转换公式：
+ * mps = radps × (wheelRadiusMM / 1000.0f)
+ * 物理意义：轮缘线速度 = 角速度 × 轮半径（米制）
+ *
+ * 示例 当radps=10 rad/s，wheelRadiusMM=65 mm时：
+ * 10 × (65 / 1000) = 0.65 m/s
+ */
+static float radpsToMps(const float radps, const float wheelRadiusMM)
+{
+    return radps * (wheelRadiusMM / 1000.0f);
+}
+
+/**
+ * @brief 将编码器脉冲数转换为旋转弧度值
+ *
+ * @param pulses 编码器脉冲数，单位：个（count）
+ *              物理意义：四倍频后的累计脉冲数（包含方向信息）
+ * @param encoderPPR 编码器每转脉冲数，单位：脉冲/转（Pulses Per Revolution）
+ *                  物理意义：编码器未倍频时每转输出的脉冲数
+ * @param gearRatio 减速比，单位：无因次量（如30:1减速比则传入30.0）
+ * @return float 旋转角度值，单位：弧度（rad）
+ *
+ * @note 转换公式：
+ * radians = (pulses × 2π) / (4 × PPR × gearRatio)
+ * 四倍频说明：编码器每个脉冲周期产生4个计数（上升沿+下降沿×2通道）
+ * 示例：encoderPPR=13, gearRatio=30, pulses=1560时：
+ * (1560 × 6.2832) / (4 × 13 × 30) = 6.2832 rad（正好1转）
+ */
+static float pulseToRad(const int32_t pulses, const float encoderPPR, const float gearRatio)
+{
+    return ((float)pulses * (float)M_PI * 2.0f) / (4.0f * encoderPPR * gearRatio);
+}
+
+/**
+ * @brief 更新累计转数值
+ *
+ * @param state 电机状态对象指针
+ * @param deltaPulses 增量脉冲数，单位：个（count）
+ * @param encoderPPR 编码器每转脉冲数，单位：脉冲/转（Pulses Per Revolution）
+ * @param gearRatio 减速比，单位：无因次量
+ *
+ * @note 转换过程：
+ * 1. 脉冲数转弧度：pulseToRad()
+ * 2. 弧度转转数：radians / 2π
+ * 公式：
+ * revolutions += (deltaPulses × π × 2) / (4 × PPR × gearRatio) / (2π)
+ * 简化为：
+ * revolutions += deltaPulses / (4 × PPR × gearRatio)
+ */
+static void updateRevolutions(MotorState* state, const int32_t deltaPulses, const float encoderPPR,
+                              const float gearRatio)
+{
+    state->position.revolutions += (float)deltaPulses / (4.0f * encoderPPR * gearRatio);
+}
+
+static float applySpeedFilter(MotorDriver* driver, float rawSpeed)
+{
+    if (driver->filter.speedFilterDepth == 0)
+        return rawSpeed;
+
+    // 更新滤波缓冲区
+    driver->filter.speedFilterBuf[driver->filter.filterIndex] = rawSpeed;
+    driver->filter.filterIndex = (driver->filter.filterIndex + 1) % driver->filter.speedFilterDepth;
+
+    // 计算移动平均
+    float sum = 0.0f;
+    for (uint8_t i = 0; i < driver->filter.speedFilterDepth; ++i)
+    {
+        sum += driver->filter.speedFilterBuf[i];
+    }
+    return sum / driver->filter.speedFilterDepth;
+}
+
+void Motor_Init(MotorDriver* driver, const PID_Params* initialPid)
 {
     // 参数检查
-    if (!driver || !hal_cfg || !spec) return;
-
-    // 硬件配置
-    driver->hal_cfg = hal_cfg;
-
-    // 规格参数
-    memcpy(&driver->spec, spec, sizeof(MotorSpec));
-    driver->spec.encoder_ppr *= 4; // 正交编码4倍频
+    if (!driver || !driver->hal_cfg || !driver->spec || !driver->state || !driver->control.pidControl)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver initialization failed");
+        return;
+    }
+    if (driver->spec->encoderPPR == 0 || driver->spec->gearRatio == 0)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Invalid encoderPPR or gearRatio");
+        return;
+    }
 
     // 控制参数初始化
-    driver->ctrl.mode = MOTOR_MODE_STOP;
-    driver->ctrl.target_rpm = 0.0f;
-    driver->ctrl.last_error = 0.0f;
-    driver->ctrl.integral = 0.0f;
+    driver->control.mode = MOTOR_MODE_STOP;
+
+    // PID控制器初始化
+    const PID_Params defaultPid = {
+        .kp = 1.0f,
+        .ki = 0.1f,
+        .kd = 0.05f,
+        .integral_max = 100.0f,
+        .output_max = 95.0f
+    };
+    PIDController_Init(driver->control.pidControl, initialPid ? initialPid : &defaultPid);
 
     // 状态初始化
-    memset(&driver->state, 0, sizeof(MotorState));
+    memset(driver->state, 0, sizeof(MotorState));
+    driver->state->velocity.radps = 0.0f;
+    driver->state->velocity.mps = 0.0f;
+    driver->state->lastUpdate = HAL_GetTick();
 
+    /* 滤波初始化 */
+    if (driver->filter.speedFilterDepth > 0 && driver->filter.speedFilterBuf != NULL)
+    {
+        // 清零滤波缓冲区
+        memset(driver->filter.speedFilterBuf, 0, sizeof(float) * driver->filter.speedFilterDepth);
+        driver->filter.filterIndex = 0;
+    }
+    else
+    {
+        // 非法配置时禁用滤波
+        driver->filter.speedFilterDepth = 0;
+        driver->filter.speedFilterBuf = NULL;
+    }
     // 初始化HAL层
-    HAL_Motor_Init(hal_cfg);
+    HAL_Motor_Init(driver->hal_cfg);
 }
 
 void Motor_SetMode(MotorDriver* driver, const MotorMode mode)
 {
-    if (!driver) return;
-
-    driver->ctrl.mode = mode;
-
-    // 模式切换时重置积分项
-    driver->ctrl.integral = 0.0f;
-    driver->ctrl.last_error = 0.0f;
-
-    if (mode == MOTOR_MODE_STOP)
+    if (!driver)
     {
-        HAL_Motor_SetPWM(driver->hal_cfg, 0);
-    }
-}
-
-void Motor_Update(MotorDriver* driver)
-{
-    if (!driver || driver->ctrl.mode == MOTOR_MODE_STOP)
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
         return;
-
-    static uint32_t last_update = 0;
-    const uint32_t current_tick = HAL_GetTick();
-    // 单位: 秒
-    const float delta_time = (float)(current_tick - last_update) / 1000.0f;
-
-    if (delta_time < 0.001f)
-        return; // 最小时间间隔1ms
-
-    // 1. 读取编码器
-    const int32_t current_pulses = HAL_Motor_ReadEncoder(driver->hal_cfg);
-    const int32_t delta_pulses = current_pulses - driver->state.total_pulses;
-
-    // 2. 计算转速
-    const float rpm = calculate_rpm(driver, delta_pulses, delta_time);
-    driver->state.total_pulses = current_pulses;
-
-    // 3. 滤波处理
-    update_speed_filter(driver, rpm);
-
-    // 4. 闭环控制
-    if (driver->ctrl.mode == MOTOR_MODE_CLOSED_LOOP)
-    {
-        const float output = apply_pid_control(driver, driver->state.rpm, delta_time);
-        const float duty = (output / driver->spec.max_rpm) * 100.0f; // 转换为占空比
-        Motor_SetSpeed(driver, duty);
     }
 
-    last_update = current_tick;
+    /* 模式切换处理 */
+    if (driver->control.mode != mode)
+    {
+        /* 退出前模式清理 */
+        switch (driver->control.mode)
+        {
+            case MOTOR_MODE_CLOSED_LOOP:
+                PID_Reset(driver->control.pidControl); // 重置积分项和误差历史
+                break;
+            case MOTOR_MODE_OPEN_LOOP:
+            case MOTOR_MODE_STOP:
+                HAL_Motor_SetDuty(driver->hal_cfg, 0); // 释放PWM
+                break;
+        }
+        /* 进入新模式初始化 */
+        driver->control.mode = mode;
+        driver->state->errorCode = 0;
+    }
 }
 
-void Motor_SetSpeed(const MotorDriver* driver, float duty)
+void Motor_SetSpeed(MotorDriver* driver, const float duty)
 {
     // 1. 有效性检查：确保驱动对象存在且处于开环模式
-    if (!driver || driver->ctrl.mode != MOTOR_MODE_OPEN_LOOP) return;
+    if (!driver || driver->control.mode != MOTOR_MODE_OPEN_LOOP)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is not in open loop mode");
+        return;
+    }
 
-    // 2. 占空比限幅：限制在[-100%, 100%]范围内
-    duty = fmaxf(fminf(duty, 100.0f), -100.0f);
+    // 2. 占空比限幅
+    const float targetDuty = fmaxf(fminf(duty, 100.0f), -100.0f);
 
-    // 3. 方向控制：根据占空比正负设置电机转向
-    const MotorDirection dir = (duty >= 0) ? MOTOR_DIR_FORWARD : MOTOR_DIR_BACKWARD;
-    HAL_Motor_SetDirection(driver->hal_cfg, dir);
-
-
-    // 4. 计算并设置PWM脉冲值
-    const uint32_t pulse = calculate_pulse(duty, driver->hal_cfg->pwm.tim);
-    HAL_Motor_SetPWM(driver->hal_cfg, pulse);
+    // 3. 计算并设置占空比（包含了方向）
+    HAL_Motor_SetDuty(driver->hal_cfg, targetDuty);
 }
 
 void Motor_SetTargetRPM(MotorDriver* driver, const float rpm)
 {
-    if (!driver) return;
+    if (!driver || driver->control.mode != MOTOR_MODE_CLOSED_LOOP)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is not in closed loop mode");
+        return;
+    }
 
-    // 限幅保护
-    driver->ctrl.target_rpm = fmaxf(fminf(rpm, driver->spec.max_rpm), -driver->spec.max_rpm);
+    // 转速限速保护(支持双向控制)
+    const float targetRPM = fmaxf(fminf(rpm, driver->spec->maxRPM), driver->spec->maxRPM * -1.0f);
+
+    /* 更新PID控制器的设定值 */
+    driver->control.pidControl->setpoint = rpmToRadps(targetRPM);
+
+    driver->control.targetRPM = targetRPM;
+}
+
+void Motor_Update(MotorDriver* driver)
+{
+    if (!driver)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
+        return;
+    }
+
+    const uint32_t lastUpdate = driver->state->lastUpdate;
+    const uint32_t now = HAL_GetTick();
+    const float deltaTime = ((float)(now - lastUpdate)) / 1000.0f; // 转换为秒
+
+
+    if (deltaTime < 0.001f) return; // 最小时间间隔1ms
+
+    /******************** 状态更新 ********************/
+    // 1. 读取编码器脉冲总数（累计）
+    const int32_t newPulses = HAL_Motor_ReadEncoder(driver->hal_cfg);
+    const int32_t deltaPulses = newPulses - driver->state->position.totalPulses;
+
+    // 2. 计算角速度
+    const float radps = pulseToRad(deltaPulses, driver->spec->encoderPPR, driver->spec->gearRatio) / deltaTime;
+
+    // 3. 滤波处理
+    driver->state->velocity.radps = applySpeedFilter(driver, radps);
+
+    // 4. 更新状态
+    driver->state->velocity.rpm = radpsToRpm(driver->state->velocity.radps);
+    driver->state->velocity.mps = radpsToMps(driver->state->velocity.radps, driver->spec->wheelRadiusMM);
+    driver->state->position.totalPulses = newPulses;
+    driver->state->position.revolutions += pulseToRad(deltaPulses, driver->spec->encoderPPR, driver->spec->gearRatio);
+    updateRevolutions(driver->state, deltaPulses, driver->spec->encoderPPR, driver->spec->gearRatio);
+    driver->state->lastUpdate = now;
+
+
+    /******************** 控制逻辑 ********************/
+    switch (driver->control.mode)
+    {
+        case MOTOR_MODE_CLOSED_LOOP:
+            {
+                // 转换目标转速为rad/s
+                const float targetRadps = rpmToRadps(driver->control.targetRPM);
+
+                // 设置 PID 控制器的目标值(关键)
+                driver->control.pidControl->setpoint = targetRadps;
+
+                // 获取当前实际角速度测量值
+                const float actualRadps = driver->state->velocity.radps;
+
+                // 执行PID计算
+                const float output = PID_Calculate(driver->control.pidControl, actualRadps, deltaTime);
+
+                // 应用输出
+                const float duty = CLAMP(output, -100.0f, 100.0f);
+                HAL_Motor_SetDuty(driver->hal_cfg, duty);
+                break;
+            }
+
+        case MOTOR_MODE_OPEN_LOOP:
+            /* 开环模式无需额外处理，PWM由用户直接设置 */
+            break;
+
+        case MOTOR_MODE_STOP:
+        default:
+            HAL_Motor_SetDuty(driver->hal_cfg, 0.0f);
+            break;
+    }
 }
 
 
 void Motor_EmergencyStop(MotorDriver* driver)
 {
-    if (!driver) return;
+    if (!driver)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
+        return;
+    }
 
     HAL_Motor_EmergencyStop(driver->hal_cfg);
-    driver->ctrl.mode = MOTOR_MODE_STOP;
-    driver->state.error_code |= 0x01;
+    driver->control.mode = MOTOR_MODE_STOP;
+    // 重置 PID 积分项
+    PID_Reset(driver->control.pidControl);
+    driver->state->errorCode |= 0x01;
 }
 
 
 void Motor_ConfigurePID(MotorDriver* driver, const PID_Params* params)
 {
-    // 参数有效性检查
-    if (driver == NULL || params == NULL)
+    if (!driver || !params)
     {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver or PID params is NULL");
         return;
     }
 
-
-
     // 拷贝PID参数到控制器
-    memcpy(&driver->ctrl.pid_params, params, sizeof(PID_Params));
-
+    memcpy(&driver->control.pidControl->params, params, sizeof(PID_Params));
     // 重置积分项和微分历史状态
-    driver->ctrl.integral = 0.0f;
-    driver->ctrl.last_error = 0.0f;
-
-}
-
-/**
- * 转速计算核心算法
- * @param driver driver
- * @param delta_pulses 脉冲变化量
- * @param delta_time 时间变化量 单位：秒
- * @return
- */
-static float calculate_rpm(const MotorDriver* driver, const int32_t delta_pulses, const float delta_time)
-{
-    if (delta_time < 0.001f) return 0.0f; // 防止除零; delta_time 单位: 秒
-    // 输出轴每转一圈对应的总编码器脉冲数
-    const float pulses_per_rev = (float)driver->spec.encoder_ppr * driver->spec.gear_ratio;
-    // 转/分钟
-    return ((float)delta_pulses / pulses_per_rev) * (60.0f / delta_time);
-}
-
-/**
- * @brief PID控制器计算函数
- * @param driver       电机驱动对象指针，包含PID参数和状态
- * @param current_rpm 当前实际转速（单位：RPM）
- * @param delta_time  距离上次计算的时间间隔（单位：秒）
- * @return float      经过PID计算后的控制输出（范围：[-output_max, output_max]）
- *
- * @note 控制器实现特点：
- * 1. 标准位置式PID算法
- * 2. 积分抗饱和处理
- * 3. 输出限幅保护
- * 4. 微分项采用误差差分法（避免设定值突变导致的微分冲击）
- */
-static float apply_pid_control(MotorDriver* driver, const float current_rpm, const float delta_time)
-{
-    // 1. 计算转速偏差（目标值 - 实际值）
-    const float error = driver->ctrl.target_rpm - current_rpm;
-
-    // 2. 比例项计算：P = Kp × e(t)
-    const float p_term = driver->ctrl.pid_params.kp * error;
-
-    // 3. 积分项计算（带抗饱和）：
-    //    a. 累计误差积分：I = ∫e(t)dt ≈ Σe(t)×Δt
-    //    b. 积分限幅防止windup
-    driver->ctrl.integral += error * delta_time;
-    driver->ctrl.integral = fmaxf(fminf(driver->ctrl.integral, driver->ctrl.pid_params.integral_max),
-                                  -driver->ctrl.pid_params.integral_max);
-    const float i_term = driver->ctrl.pid_params.ki * driver->ctrl.integral;
-
-    // 4. 微分项计算：D = Kd × de(t)/dt ≈ Kd × (e(t)-e(t-1))/Δt
-    //    使用误差差分而非测量值差分，避免设定值突变引起的微分冲击
-    const float d_term = driver->ctrl.pid_params.kd * (error - driver->ctrl.last_error) / delta_time;
-    driver->ctrl.last_error = error;
-
-    // 5. 合成输出：Output = P + I + D
-    const float output = p_term + i_term + d_term;
-
-    // 6. 输出限幅保护，确保输出在安全范围内
-    return fmaxf(fminf(output, driver->ctrl.pid_params.output_max),
-                 -driver->ctrl.pid_params.output_max);
-}
-
-/**
- * @brief 更新电机速度滤波并计算线速度
- * @param driver     电机驱动对象指针
- * @param new_speed 未经滤波的原始转速值（单位：RPM）
- *
- * @功能说明：
- * 1. 执行移动平均滤波：当滤波深度>1时，将新速度存入环形缓冲区，计算窗口平均值
- * 2. 更新状态转速值：存储滤波后的转速值到driver->state.rpm
- * 3. 计算线速度：根据公式 v = ωr = (2π*rpm/60)*r 转换角速度为线速度
- *
- * @实现细节：
- * - 使用环形缓冲区实现滑动窗口，缓冲区索引自动回绕
- * - 滤波深度通过driver->filter.speed_filter_depth配置
- * - 当滤波深度<=1时直接透传原始速度值
- * - 线速度单位：米/秒（取决于wheel_radius的单位）
- */
-static void update_speed_filter(MotorDriver* driver, const float new_speed)
-{
-    if (driver->filter.speed_filter_depth > 1)
-    {
-        // 移动平均滤波
-        driver->filter.speed_filter_buf[driver->filter.filter_index] = new_speed;
-        driver->filter.filter_index = (driver->filter.filter_index + 1) % driver->filter.speed_filter_depth;
-
-        float sum = 0.0f;
-        for (int i = 0; i < driver->filter.speed_filter_depth; i++)
-        {
-            sum += driver->filter.speed_filter_buf[i];
-        }
-        driver->state.rpm = sum / (float)driver->filter.speed_filter_depth;
-    }
-    else
-    {
-        driver->state.rpm = new_speed;
-    }
-
-    // 计算线速度：v = ω * r = (2π * rpm / 60) * r  单位：转/秒
-    driver->state.velocity = (2.0f * (float)M_PI * driver->state.rpm / 60.0f) * driver->spec.wheel_radius;
-}
-
-
-static uint32_t calculate_pulse(const double duty, const TIM_HandleTypeDef* pwm_tim)
-{
-    if (pwm_tim == NULL || pwm_tim->Instance == NULL) return 0;
-
-    // 动态获取ARR值
-    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(pwm_tim);
-
-    // 计算并四舍五入
-    const double ratio = fabs(duty) / 100.0;
-    const double raw_pulse = ratio * arr;
-
-    // 边界保护
-    const double clamped_pulse = fmax(0.0, fmin(raw_pulse, arr));
-
-    return (uint32_t)(round(clamped_pulse));
+    PID_Reset(driver->control.pidControl);
 }

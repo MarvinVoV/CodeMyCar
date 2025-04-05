@@ -10,21 +10,16 @@
 #include "log_manager.h"
 #include "servo_service.h"
 
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#define MIN_UPDATE_INTERVAL   2  // 最小2ms更新间隔
-
 static osThreadId_t servoTaskHandle = NULL;
-uint16_t calculate_dynamic_delay(int remaining_steps, int total_steps, uint16_t base_delay);
 
-void ServoTask_init(ServoService* service)
+void ServoTask_init(ServoInstance* instance)
 {
     const osThreadAttr_t servoTaskAttributes = {
         .name = "ServoTask",
         .stack_size = 512 * 4,
         .priority = (osPriority_t)osPriorityNormal,
     };
-    servoTaskHandle = osThreadNew(ServoTask_doTask, service, &servoTaskAttributes);
+    servoTaskHandle = osThreadNew(ServoTask_doTask, instance, &servoTaskAttributes);
     if (servoTaskHandle == NULL)
     {
         LOG_ERROR(LOG_MODULE_SERVO, "Failed to create ServoTask");
@@ -32,15 +27,12 @@ void ServoTask_init(ServoService* service)
     }
 }
 
-void ServoTask(void* pvParameters)
+void ServoTask_doTask(void* pvParameters)
 {
-    ServoService* service = (ServoService*)pvParameters;
-    // 任务主循环
-    TickType_t xLastWakeTime = xTaskGetTickCount();
+    ServoInstance* instance = (ServoInstance*)pvParameters;
     while (1)
     {
-        ServoService_update(service);
-
-        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(service->config.update_interval));
+        ServoService_update(instance);
+        vTaskDelay(pdMS_TO_TICKS(instance->config->updateInterval));
     }
 }

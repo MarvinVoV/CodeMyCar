@@ -10,52 +10,60 @@
 
 #include "ctrl_protocol.h"
 #include "servo_driver.h"
+#include "sys_utils.h"
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
+// 默认移动速度 200ms/度
+#define SERVO_DEFAULT_SPEED_MS 200
 
 typedef struct
 {
-    uint16_t smooth_step;     // 平滑步长（度数）
-    uint16_t update_interval; // 更新间隔(ms)
-} ServoServiceConfig;
+    int minAngle;            // 最小角度
+    int maxAngle;            // 最大角度
+    uint16_t smoothStep;     // 平滑步长（每次更新的步长）
+    uint16_t updateInterval; // 更新间隔(ms)
+    uint16_t baseDelayMs;    // 更新间隔ms (建议5-20ms)
+    uint16_t deadZone;       // 死区度数
+} InstanceConfig;
 
-// 服务层控制句柄
+
 typedef struct
 {
-    ServoInstance* driver;     // 驱动层实例
-    ServoServiceConfig config; // 服务配置
-    int target_angle;          // 服务层目标角度
-    int current_angle;         // 服务层当前角度
-    uint32_t last_update;      // 最后更新时间戳
-} ServoService;
+    ServoDriver* driver;    // 硬件配置
+    InstanceConfig* config; // 实例配置
+    int targetAngle;        // 目标角度
+    int currentAngle;       // 当前角度
+    int initAngle;          // 运动起始角度
+    int stepSize;           // 步长 默认 1 度
+    uint32_t lastUpdate;    // 上次更新的时间
+} ServoInstance;
+
 
 /**
  * @brief 初始化舵机服务
- * @param service 服务句柄
- * @param driver 驱动层实例
+ * @param instance instance
  */
-void ServoService_init(ServoService* service, ServoInstance* driver);
+void ServoService_init(ServoInstance* instance);
 
 /**
  * @brief 设置目标角度（带平滑移动）
- * @param service 服务句柄
+ * @param instance instance
  * @param angle 目标角度
- * @param speed_ms 移动速度（ms/度）
+ * @param speedMs 移动速度（ms/度）
  */
-void ServoService_setAngle(ServoService* service, int angle, uint16_t speed_ms);
-
-/**
- * @brief 更新舵机状态（需周期调用）
- * @param service 服务句柄
- * @return 当前角度
- */
-int ServoService_update(ServoService* service);
+void ServoService_setAngleSmoothly(ServoInstance* instance, const int angle, uint16_t speedMs);
 
 /**
  * @brief 立即设置角度（无平滑）
- * @param service 服务句柄
+ * @param instance instance
  * @param angle 目标角度
  */
-void ServoService_setAngleImmediate(ServoService* service, int angle);
+void ServoService_setAngleImmediate(ServoInstance* instance, const int angle);
+
+/**
+ * @brief 更新舵机状态（需周期调用）
+ * @param instance 服务句柄
+ * @return 当前角度
+ */
+int ServoService_update(ServoInstance* instance);
 
 #endif /* SERVICES_SERVO_INC_SERVO_SERVICE_H_ */

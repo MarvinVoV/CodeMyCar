@@ -13,21 +13,21 @@
 
 typedef enum
 {
-    MOTOR_DIR_FORWARD,  // 正转
-    MOTOR_DIR_BACKWARD, // 反转
-    MOTOR_COAST_STOP,   // 滑行停止（释放H桥）
-    MOTOR_BRAKE_STOP    // 刹车停止（短接线圈）
+    MOTOR_DIR_FORWARD = 0x1, // 正转
+    MOTOR_DIR_BACKWARD,      // 反转
+    MOTOR_COAST_STOP,        // 滑行停止（释放H桥）
+    MOTOR_BRAKE_STOP         // 刹车停止（短接线圈）
 } MotorDirection;
 
 
 // 电机状态结构体
 typedef struct
 {
-    int32_t encoder_ticks;    // 编码器累计脉冲数
-    uint16_t pwm_duty;        // 当前PWM占空比
+    uint16_t currentDuty;     // 当前PWM占空比
     MotorDirection direction; // 当前方向状态
-    uint8_t error_flags;      // 错误标志位（过流、过热等）
-} HAL_MotorStatus;
+    int32_t encoderTicks;     // 编码器累计脉冲数
+    uint8_t errorFlags;       // 错误标志位（过流、过热等）
+} HAL_MotorState;
 
 
 typedef struct
@@ -48,16 +48,13 @@ typedef struct
     /* 驱动控制引脚 */
     struct
     {
-        GPIO_TypeDef* in1_port; // IN1控制引脚GPIO端口（如GPIOA)
-        uint16_t in1_pin;       // IN1控制引脚编号（如GPIO_PIN_4
-        GPIO_TypeDef* in2_port; // IN2控制引脚GPIO端口（如GPIOB)
-        uint16_t in2_pin;       // IN2控制引脚编号（如GPIO_PIN_5）
+        GPIO_TypeDef* in1Port; // IN1控制引脚GPIO端口（如GPIOA)
+        uint16_t in1Pin;       // IN1控制引脚编号（如GPIO_PIN_4
+        GPIO_TypeDef* in2Port; // IN2控制引脚GPIO端口（如GPIOB)
+        uint16_t in2Pin;       // IN2控制引脚编号（如GPIO_PIN_5）
     } gpio;
 
-    struct
-    {
-        HAL_MotorStatus data; // 电机状态结构体
-    } state;
+    HAL_MotorState state; // 电机状态结构体
 } HAL_MotorConfig;
 
 /**
@@ -65,6 +62,13 @@ typedef struct
  * @param config config
  */
 void HAL_Motor_Init(HAL_MotorConfig* config);
+
+/**
+ * 设置占空比
+ * @param config config
+ * @param duty duty
+ */
+void HAL_Motor_SetDuty(HAL_MotorConfig* config, float duty);
 
 /**
  * 电机方向控制
@@ -80,14 +84,6 @@ void HAL_Motor_SetDirection(HAL_MotorConfig* config, MotorDirection direction);
 void HAL_Motor_EmergencyStop(HAL_MotorConfig* config);
 
 /**
- * PWM控制
- * @param config config
- * @param duty duty
- */
-void HAL_Motor_SetPWM(HAL_MotorConfig* config, uint16_t duty);
-
-
-/**
  * 读取电机编码器的累积脉冲值，用于获取电机的转动位置和速度信息
  * @param config config
  * @return count
@@ -97,8 +93,8 @@ int32_t HAL_Motor_ReadEncoder(HAL_MotorConfig* config);
 /**
  * 获取电机状态
  * @param config config
- * @return status
+ * @return state
  */
-HAL_MotorStatus HAL_Motor_GetStatus(const HAL_MotorConfig* config);
+HAL_MotorState HAL_Motor_GetStatus(const HAL_MotorConfig* config);
 
 #endif /* MODULES_MOTOR_INC_MOTOR_HAL_H_ */

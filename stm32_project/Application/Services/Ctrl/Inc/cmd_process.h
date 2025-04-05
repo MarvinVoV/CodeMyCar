@@ -9,7 +9,7 @@
 #define SERVICES_CTRL_INC_CMD_PROCESS_H_
 #include "ctrl_protocol.h"
 #include "motor_service.h"
-#include "servo_driver.h"
+#include "servo_service.h"
 
 // Q格式转换宏
 #define Q15_TO_FLOAT(x) ((float)(x) / 32768.0f)

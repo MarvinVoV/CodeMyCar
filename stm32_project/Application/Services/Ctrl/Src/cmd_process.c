@@ -34,7 +34,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
                 {
                     MotionController_emergencyStop(ctx->motionCtrl);
                     // 快速回中
-                    ServoDriver_setSmoothAngle(ctx->steerServo, 90, 100);
+                    ServoService_setAngleImmediate(ctx->steerServo, 90);
                     break;
                 }
 
@@ -45,7 +45,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
 
                     // 设置舵机角度
                     const int angle = param->steer_angle;
-                    ServoDriver_setSmoothAngle(ctx->steerServo, angle, 200);
+                    ServoService_setAngleSmoothly(ctx->steerServo, angle, 200);
 
                     // 转换为差速控制
                     const float left_speed = Q15_TO_FLOAT(param->left_speed);
@@ -62,7 +62,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
             case MOTION_DIFFERENTIAL:
                 {
                     // 纯差速模式：舵机回中，通过角速度控制
-                    ServoDriver_setSmoothAngle(ctx->steerServo, 90, 500); // 慢速回中
+                    ServoService_setAngleSmoothly(ctx->steerServo, 90, 500); // 慢速回中
 
                     // 从运动学参数获取指令
                     const KinematicParam* param = &motion->params.kinematic;
@@ -80,7 +80,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
 
                     // 1. 设置前轮转角
                     const float steer_angle = Q7_TO_FLOAT(param->steer_angle);
-                    ServoDriver_setSmoothAngle(ctx->steerServo, (int)steer_angle, 200);
+                    ServoService_setAngleSmoothly(ctx->steerServo, (int)steer_angle, 200);
 
                     // 2. 根据转向几何计算等效角速度
                     const float linear = Q15_TO_FLOAT(param->linear_vel);
@@ -106,7 +106,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
 
                     // 1. 设置前轮转角
                     const float steer_angle = Q7_TO_FLOAT(param->steer_angle);
-                    ServoDriver_setSmoothAngle(ctx->steerServo, (int)steer_angle, 200);
+                    ServoService_setAngleSmoothly(ctx->steerServo, (int)steer_angle, 200);
 
                     // 2. 综合两种转向方式
                     const float linear = Q15_TO_FLOAT(param->linear_vel);

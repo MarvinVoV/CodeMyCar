@@ -9,12 +9,21 @@
 #include <string.h>
 #include "motor_hal.h"
 
+#include "cmd_process.h"
+#include "log_manager.h"
+
 
 /**
  * 相关配置已经通过 CubeMX 完成配置，这里只需要实现启动逻辑即可
  */
 void HAL_Motor_Init(HAL_MotorConfig* config)
 {
+    // 参数校验
+    if (!config)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL MotorConfig is NULL");
+        return;
+    }
     // 初始化PWM
     HAL_TIM_PWM_Start(config->pwm.tim, config->pwm.ch);
 
@@ -22,11 +31,11 @@ void HAL_Motor_Init(HAL_MotorConfig* config)
     HAL_TIM_Encoder_Start(config->encoder.tim, TIM_CHANNEL_ALL);
 
     // 初始化GPIO默认状态
-    HAL_GPIO_WritePin(config->gpio.in1_port, config->gpio.in1_pin, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(config->gpio.in2_port, config->gpio.in2_pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(config->gpio.in1Port, config->gpio.in1Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(config->gpio.in2Port, config->gpio.in2Pin, GPIO_PIN_RESET);
 
     // 初始化状态
-    memset(&config->state.data, 0, sizeof(HAL_MotorStatus));
+    memset(&config->state, 0, sizeof(HAL_MotorState));
 }
 
 /**
@@ -43,27 +52,33 @@ void HAL_Motor_InitEncoder(TIM_HandleTypeDef* htim)
 
 void HAL_Motor_SetDirection(HAL_MotorConfig* config, const MotorDirection direction)
 {
+    if (!config)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL MotorConfig is NULL");
+        return;
+    }
+
     // 更新方向状态
-    config->state.data.direction = direction;
+    config->state.direction = direction;
     switch (direction)
     {
         case MOTOR_DIR_FORWARD:
-            HAL_GPIO_WritePin(config->gpio.in1_port, config->gpio.in1_pin, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(config->gpio.in2_port, config->gpio.in2_pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(config->gpio.in1Port, config->gpio.in1Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(config->gpio.in2Port, config->gpio.in2Pin, GPIO_PIN_RESET);
             break;
 
         case MOTOR_DIR_BACKWARD:
-            HAL_GPIO_WritePin(config->gpio.in1_port, config->gpio.in1_pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(config->gpio.in2_port, config->gpio.in2_pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(config->gpio.in1Port, config->gpio.in1Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(config->gpio.in2Port, config->gpio.in2Pin, GPIO_PIN_SET);
             break;
         case MOTOR_COAST_STOP:
-            HAL_GPIO_WritePin(config->gpio.in1_port, config->gpio.in1_pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(config->gpio.in2_port, config->gpio.in2_pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(config->gpio.in1Port, config->gpio.in1Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(config->gpio.in2Port, config->gpio.in2Pin, GPIO_PIN_RESET);
             break;
 
         case MOTOR_BRAKE_STOP:
-            HAL_GPIO_WritePin(config->gpio.in1_port, config->gpio.in1_pin, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(config->gpio.in2_port, config->gpio.in2_pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(config->gpio.in1Port, config->gpio.in1Pin, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(config->gpio.in2Port, config->gpio.in2Pin, GPIO_PIN_SET);
             break;
         default:
             break;
@@ -72,8 +87,14 @@ void HAL_Motor_SetDirection(HAL_MotorConfig* config, const MotorDirection direct
 
 void HAL_Motor_EmergencyStop(HAL_MotorConfig* config)
 {
+    if (!config)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL MotorConfig is NULL");
+        return;
+    }
+
     // 立即关闭PWM输出
-    HAL_Motor_SetPWM(config, 0);
+    HAL_Motor_SetDuty(config, 0);
 
     // 激活硬件刹车模式
     HAL_Motor_SetDirection(config, MOTOR_BRAKE_STOP);
@@ -82,42 +103,85 @@ void HAL_Motor_EmergencyStop(HAL_MotorConfig* config)
     __HAL_TIM_SET_COUNTER(config->encoder.tim, 0);
 
     // 设置急停标志位
-    config->state.data.error_flags |= 0x01;
+    config->state.errorFlags |= 0x01;
 }
 
-void HAL_Motor_SetPWM(HAL_MotorConfig* config, uint16_t duty)
+void HAL_Motor_SetDuty(HAL_MotorConfig* config, const float duty)
 {
-    // 限制占空比在ARR范围内
-    const uint16_t arr = __HAL_TIM_GET_AUTORELOAD(config->pwm.tim);
-    duty = (duty > arr) ? arr : duty;
+    if (!config)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL MotorConfig is NULL");
+        return;
+    }
 
-    __HAL_TIM_SET_COMPARE(config->pwm.tim, config->pwm.ch, duty);
+    // 占空比限幅
+    const int32_t targetDuty = CLAMP(duty, -100, 100);
 
-    // 更新状态中的占空比
-    config->state.data.error_flags |= 0x01; // 设置急停标志位
+    // 获取定时器的 ARR（PWM 周期）
+    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(config->pwm.tim);
+
+    // 计算 CCR 值（四舍五入优化）
+    const uint32_t ccr = (uint32_t)(fabs(targetDuty) * arr + 50.0) / 100;
+
+    // 确保 CCR 不超过 ARR
+    const uint16_t safeCCR = (ccr > arr) ? arr : ccr;
+
+    // 设置方向
+    MotorDirection direction;
+    if (targetDuty == 0)
+    {
+        direction = MOTOR_COAST_STOP;
+    }
+    else if (targetDuty > 0)
+    {
+        direction = MOTOR_DIR_FORWARD;
+    }
+    else
+    {
+        direction = MOTOR_DIR_BACKWARD;
+    }
+    HAL_Motor_SetDirection(config, direction);
+
+    // 更新 PWM 比较值
+    __HAL_TIM_SET_COMPARE(config->pwm.tim, config->pwm.ch, safeCCR);
+
+    // 更新状态
+    config->state.currentDuty = targetDuty;
 }
 
 int32_t HAL_Motor_ReadEncoder(HAL_MotorConfig* config)
 {
-    static uint32_t last_cnt = 0;
-    static int32_t total_ticks = 0;
+    if (!config)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL MotorConfig is NULL");
+        return 0;
+    }
 
-    const uint32_t current_cnt = __HAL_TIM_GET_COUNTER(config->encoder.tim);
+    const uint32_t lastTicks = config->state.encoderTicks;
+    const uint32_t currentTicks = __HAL_TIM_GET_COUNTER(config->encoder.tim);
     /*
      * 自动识别溢出，例如:
      * 当计数器从65535溢出到0时，delta = 0 - 65535 = -65535（实际应为+1），但由于int16_t强制类型转换，会修正为+1。
      */
-    const int16_t delta = (int16_t)(current_cnt - last_cnt);
-    total_ticks += delta;
-    last_cnt = current_cnt;
+    int32_t delta = (int32_t)(currentTicks - lastTicks);
+    if (currentTicks < lastTicks && delta < -0x8000) // 16位溢出
+    {
+        {
+            delta = (int32_t)currentTicks + (0x10000 - (int32_t)lastTicks);
+        }
 
-    // 更新编码器累积值
-    config->state.data.encoder_ticks += delta;
-
-    return total_ticks;
+        // 更新编码器累积值
+        config->state.encoderTicks += delta;
+    }
+    return config->state.encoderTicks;
 }
 
-HAL_MotorStatus HAL_Motor_GetStatus(const HAL_MotorConfig* config)
+HAL_MotorState HAL_Motor_GetStatus(const HAL_MotorConfig* config)
 {
-    return config->state.data; // 返回状态结构体副本 (值返回机制：结构体值拷贝而非指针)
+    if (!config)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL MotorConfig is NULL");
+        return (HAL_MotorState){0};
+    }
+    return config->state; // 返回状态结构体副本 (值返回机制：结构体值拷贝而非指针)
 }

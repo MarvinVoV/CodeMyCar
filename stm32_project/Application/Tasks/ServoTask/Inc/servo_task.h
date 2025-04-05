@@ -10,7 +10,7 @@
 
 #include "servo_service.h"
 
-void ServoTask_init(ServoService* service);
-void ServoTask_doTask(void* arg);
+void ServoTask_init(ServoInstance* instance);
+void ServoTask_doTask(void* pvParameters);
 
 #endif /* TASKS_SERVOTASK_SERVO_TASK_H_ */

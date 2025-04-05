@@ -20,22 +20,33 @@ typedef enum
 } MotorMode;
 
 
-// 电机规格参数
+// 电机物理参数
 typedef struct
 {
-    uint16_t encoder_ppr; // 编码器线数（未计算倍频）
-    float gear_ratio;     // 减速比
-    float max_rpm;        // 最大允许转速
-    float wheel_radius;   // 轮子半径（米）
+    uint16_t encoderPPR; // [count/rev] 编码器每转脉冲数（未计算倍频）
+    uint16_t gearRatio;  // [x:1] 减速比 （如30:1存储为30）
+    float wheelRadiusMM; // [mm] 轮半径（毫米级精度）
+    float maxRPM;        // [rpm] 最大转速
 } MotorSpec;
 
 // 电机实时状态
 typedef struct
 {
-    float rpm;            // 当前转速（转/分）
-    float velocity;       // 线速度（米/秒）
-    int32_t total_pulses; // 累计脉冲数
-    int32_t error_code;   // 错误码
+    struct
+    {
+        float radps; // [rad/s] 当前角速度，电机输出轴（即经过减速后的最终输出轴）的角速度
+        float mps;   // [m/s] 当前线速度，轮子边缘的线速度
+        float rpm;   // [RPM] 当前转速，电机输出轴（即经过减速后的最终输出轴）的转速
+    } velocity;
+
+    struct
+    {
+        int32_t totalPulses; // 累计脉冲数（原始数据）
+        float revolutions;   // 累计转数
+    } position;
+
+    uint32_t lastUpdate; // 上次更新时间
+    int32_t errorCode;   // 错误码
 } MotorState;
 
 // 电机驱动控制器
@@ -45,37 +56,34 @@ typedef struct
     HAL_MotorConfig* hal_cfg;
 
     // 规格参数
-    MotorSpec spec;
+    MotorSpec* spec;
 
     // 控制参数
     struct
     {
-        MotorMode mode;        // 当前控制模式
-        PID_Params pid_params; // PID参数
-        float target_rpm;      // 目标转速
-        float last_error;      // 上次误差（用于微分项）
-        float integral;        // 积分项累计
-    } ctrl;
+        MotorMode mode;             // 当前控制模式
+        float targetRPM;            // 目标转速 单位是转每分钟，表示电机输出轴（即经过减速后的最终输出轴）的转速
+        PID_Controller* pidControl; // PID参数
+    } control;
 
     // 实时状态
-    MotorState state;
+    MotorState* state;
 
     // 滤波参数
     struct
     {
-        uint8_t speed_filter_depth; // 速度滤波窗口大小
-        float* speed_filter_buf;    // 滤波缓冲区
-        uint8_t filter_index;       // 滤波缓冲区索引
+        uint8_t speedFilterDepth; // 速度滤波窗口大小
+        float* speedFilterBuf;    // 滤波缓冲区
+        uint8_t filterIndex;      // 滤波缓冲区索引
     } filter;
 } MotorDriver;
 
 /**
  * 初始化电机驱动
  * @param driver driver
- * @param hal_cfg hal_cfg
- * @param spec spec
+ * @param initialPid 初始化PID参数
  */
-void Motor_Init(MotorDriver* driver, HAL_MotorConfig* hal_cfg, const MotorSpec* spec);
+void Motor_Init(MotorDriver* driver, const PID_Params* initialPid);
 
 /**
  * @brief 设置电机控制模式
@@ -107,7 +115,7 @@ void Motor_SetMode(MotorDriver* driver, MotorMode mode);
 /**
  * @brief 设置电机目标转速（RPM） (闭环模式)
  * @param driver 电机驱动对象指针，指向要控制的电机实例
- * @param rpm 目标转速值，单位为转/分钟（Revolutions Per Minute）
+ * @param rpm 电机输出轴目标转速值，单位为转/分钟（Revolutions Per Minute）
  *            正值为正转方向，负值为反转方向
  *
  * @note 此函数会自动将目标转速限制在电机规格允许的范围内：
@@ -144,7 +152,7 @@ void Motor_SetTargetRPM(MotorDriver* driver, float rpm);
  * @see HAL_Motor_SetDirection 底层方向控制接口
  * @see HAL_Motor_SetPWM 底层PWM设置接口
  */
-void Motor_SetSpeed(const MotorDriver* driver, float duty);
+void Motor_SetSpeed(MotorDriver* driver, const float duty);
 
 
 /**
