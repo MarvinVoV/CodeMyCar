@@ -14,10 +14,10 @@
 // 电机运行模式
 typedef enum
 {
-    MOTOR_MODE_STOP,       // 停止模式
-    MOTOR_MODE_OPEN_LOOP,  // 开环控制
-    MOTOR_MODE_CLOSED_LOOP // 闭环控制
-} MotorMode;
+    MOTOR_DRIVER_MODE_STOP,       // 停止模式
+    MOTOR_DRIVER_MODE_OPEN_LOOP,  // 开环控制
+    MOTOR_DRIVER_MODE_CLOSED_LOOP // 闭环控制
+} MotorDriverMode;
 
 
 // 电机物理参数
@@ -45,9 +45,12 @@ typedef struct
         float revolutions;   // 累计转数
     } position;
 
+    // 开环控制
+    float openLoopDuty; // 当前占空比（0.0~1.0）
+
     uint32_t lastUpdate; // 上次更新时间
     int32_t errorCode;   // 错误码
-} MotorState;
+} MotorDriverState;
 
 // 电机驱动控制器
 typedef struct
@@ -61,13 +64,13 @@ typedef struct
     // 控制参数
     struct
     {
-        MotorMode mode;             // 当前控制模式
+        MotorDriverMode mode;       // 当前控制模式
         float targetRPM;            // 目标转速 单位是转每分钟，表示电机输出轴（即经过减速后的最终输出轴）的转速
         PID_Controller* pidControl; // PID参数
     } control;
 
     // 实时状态
-    MotorState* state;
+    MotorDriverState state;
 
     // 滤波参数
     struct
@@ -83,7 +86,7 @@ typedef struct
  * @param driver driver
  * @param initialPid 初始化PID参数
  */
-void Motor_Init(MotorDriver* driver, const PID_Params* initialPid);
+void MotorDriver_Init(MotorDriver* driver, const PID_Params* initialPid);
 
 /**
  * @brief 设置电机控制模式
@@ -110,7 +113,7 @@ void Motor_Init(MotorDriver* driver, const PID_Params* initialPid);
  * // 紧急停机
  * Motor_SetMode(&motor, MOTOR_MODE_STOP);
  */
-void Motor_SetMode(MotorDriver* driver, MotorMode mode);
+void MotorDriver_SetMode(MotorDriver* driver, MotorDriverMode mode);
 
 /**
  * @brief 设置电机目标转速（RPM） (闭环模式)
@@ -123,14 +126,14 @@ void Motor_SetMode(MotorDriver* driver, MotorMode mode);
  *       - 最大反向转速：-spec.max_rpm
  *       例如：若 spec.max_rpm = 300，则允许的 rpm 范围为 [-300, 300]
  */
-void Motor_SetTargetRPM(MotorDriver* driver, float rpm);
+void MotorDriver_SetTargetRPM(MotorDriver* driver, float rpm);
 
 
 /**
  * @brief 设置电机开环控制模式下的PWM占空比
  *
  * @param driver 电机驱动对象指针，指向已初始化的MotorDriver实例
- * @param duty PWM占空比（百分比），有效范围[-100.0, 100.0]
+ * @param dutyCycle PWM占空比（百分比），有效范围[-100.0, 100.0]
  *            - 正值表示正转方向，绝对值越大输出功率越高
  *            - 负值表示反转方向，绝对值越大输出功率越高
  *            - 0表示停止（具体行为取决于HAL_Motor_SetDirection的实现）
@@ -152,7 +155,7 @@ void Motor_SetTargetRPM(MotorDriver* driver, float rpm);
  * @see HAL_Motor_SetDirection 底层方向控制接口
  * @see HAL_Motor_SetPWM 底层PWM设置接口
  */
-void Motor_SetSpeed(MotorDriver* driver, const float duty);
+void MotorDriver_SetDutyCycle(MotorDriver* driver, const float dutyCycle);
 
 
 /**
@@ -185,7 +188,7 @@ void Motor_SetSpeed(MotorDriver* driver, const float duty);
  * }
  * @endcode
  */
-void Motor_Update(MotorDriver* driver);
+void MotorDriver_Update(MotorDriver* driver);
 
 /**
  * @brief 获取电机当前状态信息
@@ -211,7 +214,7 @@ void Motor_Update(MotorDriver* driver);
  * MotorState s = Motor_GetState(&motor);
  * printf("当前转速: %.2f RPM\n", s.rpm);
  */
-MotorState Motor_GetState(MotorDriver* driver);
+MotorDriverState MotorDriver_GetState(MotorDriver* driver);
 
 /**
  * @brief 执行电机紧急停止操作
@@ -239,7 +242,7 @@ MotorState Motor_GetState(MotorDriver* driver);
  * }
  * @endcode
  */
-void Motor_EmergencyStop(MotorDriver* driver);
+void MotorDriver_EmergencyStop(MotorDriver* driver);
 
 
 /**
@@ -275,7 +278,7 @@ void Motor_EmergencyStop(MotorDriver* driver);
  * Motor_ConfigurePID(&motor, &pid);
  * @endcode
  */
-void Motor_ConfigurePID(MotorDriver* driver, const PID_Params* params);
+void MotorDriver_ConfigurePID(MotorDriver* driver, const PID_Params* params);
 
 
 #endif /* MODULES_MOTOR_INC_MOTOR_DRIVER_H_ */

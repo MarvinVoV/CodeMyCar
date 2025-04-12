@@ -7,9 +7,9 @@
 
 #ifndef SERVICES_CTRL_INC_CMD_PROCESS_H_
 #define SERVICES_CTRL_INC_CMD_PROCESS_H_
+
 #include "ctrl_protocol.h"
-#include "motor_service.h"
-#include "servo_service.h"
+#include "motion_service.h"
 
 // Q格式转换宏
 #define Q15_TO_FLOAT(x) ((float)(x) / 32768.0f)
@@ -17,8 +17,7 @@
 
 typedef struct
 {
-    MotionController* motionCtrl; // 运动控制器实例
-    ServoInstance* steerServo;    // 转向舵机实例
+    MotionContext* motionContext;
 } CmdProcessorContext;
 
 void CmdProcessor_Init(CmdProcessorContext* commandContext);

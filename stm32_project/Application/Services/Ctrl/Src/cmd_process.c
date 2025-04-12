@@ -4,126 +4,145 @@
  *  Created on: Mar 30, 2025
  *      Author: marvin
  */
-#include "cmd_process.h"
-#include "log_manager.h"
 #include <string.h>
-
+#include "cmd_process.h"
+#include "error_code.h"
+#include "log_manager.h"
 #include "ctrl_protocol.h"
-#include "servo_service.h"
+
+static inline float Q16_ToFloat(int32_t fixed);
+static inline float Q8_7_ToFloat(int16_t fixed);
+static inline float Gain8bit_ToFloat(uint8_t gain);
 
 static CmdProcessorContext* ctx;
 
 void CmdProcessor_Init(CmdProcessorContext* commandContext)
 {
+    if (!commandContext->motionContext)
+    {
+        return;
+    }
     ctx = commandContext;
 }
 
 void CmdProcessor_processCommand(const ControlCmd* cmd)
 {
     // 1. 安全校验
-    if (!ctx || !cmd || !ctx->motionCtrl || !ctx->steerServo) return;
+    if (!ctx) return;
 
     // 2. 处理运动指令
     if (cmd->fields & CTRL_FIELD_MOTION)
     {
         const MotionCmd* motion = &cmd->motion;
+        MotionContext* motionCtx = ctx->motionContext;
 
+        int ret = ERR_SUCCESS;
+        // 模式切换前检查
+        if (motion->mode != MOTION_EMERGENCY_STOP)
+        {
+            ret = MotionService_SetControlMode(motionCtx, (MotionCtrlMode)motion->mode);
+            if (ret != ERR_SUCCESS)
+            {
+                LOG_ERROR(LOG_MODULE_CMD, "Mode switch failed: 0x%02X", motion->mode);
+                return;
+            }
+        }
+
+        // 模式分派处理
         switch (motion->mode)
         {
-            case MOTION_EMERGENCY_STOP:
+            case CMD_MOTION_EMERGENCY_STOP:
+                MotionService_EmergencyStop(motionCtx);
+                break;
+
+            case CMD_MOTION_DIFFERENTIAL:
                 {
-                    MotionController_emergencyStop(ctx->motionCtrl);
-                    // 快速回中
-                    ServoService_setAngleImmediate(ctx->steerServo, 90);
+                    const float linear = Q16_ToFloat(motion->params.diffCtrl.linearVel);
+                    const float angular = Q16_ToFloat(motion->params.diffCtrl.angularVel);
+                    ret = MotionService_SetVelocity(motionCtx, linear, angular);
                     break;
                 }
 
-            case MOTION_DIRECT_CONTROL:
+            case CMD_MOTION_STEER_ONLY:
                 {
-                    // 直接控制模式：独立设置舵机和轮速
-                    const DirectCtrlParam* param = &motion->params.direct;
-
-                    // 设置舵机角度
-                    const int angle = param->steer_angle;
-                    ServoService_setAngleSmoothly(ctx->steerServo, angle, 200);
-
-                    // 转换为差速控制
-                    const float left_speed = Q15_TO_FLOAT(param->left_speed);
-                    const float right_speed = Q15_TO_FLOAT(param->right_speed);
-
-                    // 计算合成线速度和角速度
-                    const float linear = (left_speed + right_speed) / 2.0f;
-                    const float angular = (right_speed - left_speed) / ctx->motionCtrl->config.wheel_base;
-
-                    MotionController_setVelocity(ctx->motionCtrl, linear, angular);
+                    const float linear = Q16_ToFloat(motion->params.kinematicCtrl.linearVel);
+                    const float steer = Q8_7_ToFloat(motion->params.kinematicCtrl.steerAngle);
+                    ret = MotionService_SetAckermannParams(motionCtx, linear, steer);
                     break;
                 }
 
-            case MOTION_DIFFERENTIAL:
+            case CMD_MOTION_DIRECT_CONTROL:
                 {
-                    // 纯差速模式：舵机回中，通过角速度控制
-                    ServoService_setAngleSmoothly(ctx->steerServo, 90, 500); // 慢速回中
-
-                    // 从运动学参数获取指令
-                    const KinematicParam* param = &motion->params.kinematic;
-                    const float linear = Q15_TO_FLOAT(param->linear_vel);
-                    const float angular = Q15_TO_FLOAT(param->angular_vel);
-
-                    MotionController_setVelocity(ctx->motionCtrl, linear, angular);
+                    const float leftRpm = Q16_ToFloat(motion->params.directCtrl.leftRpm);
+                    const float rightRpm = Q16_ToFloat(motion->params.directCtrl.rightRpm);
+                    const float steer = Q8_7_ToFloat(motion->params.directCtrl.steerAngle);
+                    ret = MotionService_SetDirectControl(motionCtx, leftRpm, rightRpm, steer);
                     break;
                 }
 
-            case MOTION_STEER_ONLY:
+            case CMD_MOTION_MIXED_STEER:
                 {
-                    // 前轮转向模式：保持当前线速度，只控制转向
-                    const KinematicParam* param = &motion->params.kinematic;
-
-                    // 1. 设置前轮转角
-                    const float steer_angle = Q7_TO_FLOAT(param->steer_angle);
-                    ServoService_setAngleSmoothly(ctx->steerServo, (int)steer_angle, 200);
-
-                    // 2. 根据转向几何计算等效角速度
-                    const float linear = Q15_TO_FLOAT(param->linear_vel);
-                    const float angular = linear * tanf(steer_angle * M_PI / 180.0f) /
-                        ctx->motionCtrl->config.wheel_base;
-                    MotionController_setVelocity(ctx->motionCtrl, linear, angular);
+                    DiffCtrlParam* base = &motion->params.mixedCtrl.base;
+                    float linear = Q16_ToFloat(base->linearVel);
+                    float angular = Q16_ToFloat(base->angularVel);
+                    float steer = Q8_7_ToFloat(motion->params.mixedCtrl.steerAngle);
+                    float gain = Gain8bit_ToFloat(motion->params.mixedCtrl.differentialGain);
+                    ret = MotionService_SetHybridParams(motionCtx, linear, angular, steer, gain);
                     break;
                 }
 
-            case MOTION_SPIN_IN_PLACE:
+            case CMD_MOTION_SPIN_IN_PLACE:
                 {
-                    // 原地旋转：线速度为0，角速度由参数决定
-                    const SpinParam* param = &motion->params.spin;
-                    const float angular = param->radius == 0 ? param->angular_vel : 0;
-                    MotionController_setVelocity(ctx->motionCtrl, 0, angular);
-                    break;
-                }
-
-            case MOTION_MIXED_STEER:
-                {
-                    // 混合模式：同时控制转向和差速
-                    const KinematicParam* param = &motion->params.kinematic;
-
-                    // 1. 设置前轮转角
-                    const float steer_angle = Q7_TO_FLOAT(param->steer_angle);
-                    ServoService_setAngleSmoothly(ctx->steerServo, (int)steer_angle, 200);
-
-                    // 2. 综合两种转向方式
-                    const float linear = Q15_TO_FLOAT(param->linear_vel);
-                    const float angular_steer = linear * tanf(steer_angle * M_PI / 180.0f) /
-                        ctx->motionCtrl->config.wheel_base;
-                    const float angular_diff = Q15_TO_FLOAT(param->angular_vel);
-
-                    MotionController_setVelocity(ctx->motionCtrl, linear, angular_steer + angular_diff);
+                    DiffCtrlParam* p = &motion->params.diffCtrl;
+                    const float angular = Q16_ToFloat(p->angularVel);
+                    ret = MotionService_SetSpinParams(motionCtx, angular);
                     break;
                 }
 
             default:
+                LOG_ERROR(LOG_MODULE_CMD, "Unknown motion mode: 0x%02X", motion->mode);
+                ret = ERR_INVALID_PARAM;
                 break;
+        }
+        // 处理执行结果
+        if (ret != ERR_SUCCESS)
+        {
+            LOG_ERROR(LOG_MODULE_CMD, "Command execute failed: 0x%04X", ret);
         }
     }
     else if (cmd->fields & CTRL_FIELD_TEXT)
     {
         LOG_INFO(LOG_MODULE_SYSTEM, "Receive debug %.*s\n", cmd->pingText.len, cmd->pingText.msg);
     }
+}
+
+// Q16.16定点数转换（带范围检查）
+static inline float Q16_ToFloat(int32_t fixed)
+{
+    const float MAX_VALUE = 32767.99998f; // 0x7FFFFFFF / 65536.0
+    const float MIN_VALUE = -32768.0f;
+    return fmaxf(fminf((float)fixed / 65536.0f, MAX_VALUE), MIN_VALUE);
+}
+
+// Q8.7定点数转换（角度专用）
+static inline float Q8_7_ToFloat(int16_t fixed)
+{
+    const float MAX_ANGLE = 90.0f; // 协议限制最大角度
+    const float raw = (float)fixed / 128.0f;
+    return fmaxf(fminf(raw, MAX_ANGLE), -MAX_ANGLE);
+}
+
+/**
+ * @brief 将8位增益值转换为浮点数
+ * @param gain 输入参数（0-255）
+ * @return 映射到 0.0~1.0 的浮点值
+ *
+ * @note 边界处理：
+ *   - gain=0   → 0.0
+ *   - gain=255 → 1.0
+ *   - 其他值按线性映射
+ */
+static inline float Gain8bit_ToFloat(uint8_t gain)
+{
+    return (float)gain / 255.0f;
 }

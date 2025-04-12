@@ -12,10 +12,10 @@
 #include "queue_manager.h"
 #include "uart_handle.h"
 
-static osThreadId_t rawDataReadTaskHandle = NULL;
 // 累积缓冲区大小
 #define ACCUMULATE_BUF_SIZE ( 5 * PROTOCOL_MAX_DATA_LEN)
 
+static osThreadId_t rawDataReadTaskHandle = NULL;
 // 协议解析处理器
 static protocol_receiver receiver;
 

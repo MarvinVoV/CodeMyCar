@@ -8,7 +8,7 @@
 #ifndef SERVICES_CTRL_INC_QUEUE_MANAGER_H_
 #define SERVICES_CTRL_INC_QUEUE_MANAGER_H_
 
-#include "cmsis_os.h"
+#include "cmsis_os2.h"
 
 typedef enum
 {

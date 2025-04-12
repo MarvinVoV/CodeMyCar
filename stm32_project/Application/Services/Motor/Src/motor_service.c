@@ -9,226 +9,234 @@
 #include <math.h>
 #include <stdlib.h>
 #include "motor_service.h"
+
+#include "log_manager.h"
+#include "motor_task.h"
 #include "pid_controller.h"
 
 
-#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
+#define LOCK_TIMEOUT_MS 50
 
-// 私有函数声明
-/* 私有函数声明 */
-static void CalculateWheelSpeeds(MotionController* ctrl);
-static void UpdateActualStates(MotionController* ctrl, float delta_time);
-static void ApplyControlLogic(MotionController* ctrl, float delta_time);
-static void CheckSystemHealth(MotionController* ctrl);
+static float calculateOdometer(float revolutions, float wheelRadiusMM);
 
-/* 初始化与配置 */
-void MotionController_init(MotionController* ctrl, MotorDriver* left, MotorDriver* right, const MotionConfig* config)
+void MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriver* rightDriver)
 {
-    if (!ctrl || !left || !right || !config) return;
+    if (!service || !leftDriver || !rightDriver)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "MotorService_init: invalid instance or hardware driver!");
+        return;
+    }
 
-    // 绑定硬件驱动
-    ctrl->left = left;
-    ctrl->right = right;
+    memset(service, 0, sizeof(MotorService));
+    // 初始化左轮
+    service->instances[MOTOR_LEFT_WHEEL].driver = leftDriver;
+    service->instances[MOTOR_LEFT_WHEEL].mutex = osMutexNew(NULL);
+    if (service->instances[MOTOR_LEFT_WHEEL].mutex == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Failed to create left motor mutex!");
+        return;
+    }
 
-    // 复制配置参数
-    ctrl->config = *config;
+    // 初始化右轮
+    service->instances[MOTOR_RIGHT_WHEEL].driver = rightDriver;
+    service->instances[MOTOR_RIGHT_WHEEL].mutex = osMutexNew(NULL);
+    if (service->instances[MOTOR_RIGHT_WHEEL].mutex == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Failed to create right motor mutex!");
+        return;
+    }
 
-    // 初始化状态
-    memset(&ctrl->status, 0, sizeof(MotionStatus));
-    ctrl->status.system.voltage = 12.0f; // 初始电压
+    // 初始化硬件驱动
+    MotorDriver_Init(leftDriver, NULL);
+    MotorDriver_Init(rightDriver, NULL);
 
-
-    // 初始化线速度PID
-    const PID_Params linear_pid_params = {
-        .kp = config->linear_pid.kp,
-        .ki = config->linear_pid.ki,
-        .kd = config->linear_pid.kd,
-        .integral_max = config->linear_pid.integral_max,
-        .output_max = config->linear_pid.output_max
-    };
-    PIDController_Init(&ctrl->linear_pid, &linear_pid_params);
-    ctrl->linear_pid.setpoint = 0.0f; // 初始目标为0
-
-    // 初始化角速度PID
-    const PID_Params angular_pid_params = {
-        .kp = config->angular_pid.kp,
-        .ki = config->angular_pid.ki,
-        .kd = config->angular_pid.kd,
-        .integral_max = config->angular_pid.integral_max,
-        .output_max = config->angular_pid.output_max
-    };
-    PIDController_Init(&ctrl->angular_pid, &angular_pid_params);
-    ctrl->angular_pid.setpoint = 0.0f; // 初始目标为0
+    // 创建任务
+    MotorTask_init(service);
 }
 
-/* 设置目标速度 */
-void MotionController_setVelocity(MotionController* ctrl, const float linear, const float angular)
+int MotorService_setTargetRPM(MotorService* service, MotorID motorId, float rpm)
 {
-    if (!ctrl || ctrl->status.system.error_code) return;
+    if (!service || motorId >= MOTOR_MAX_NUM)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "MotorService_setTargetRPM: invalid instance or motor id!");
+        return -1;
+    }
+
+    MotorInstance* instance = &service->instances[motorId];
+    if (osMutexAcquire(instance->mutex, LOCK_TIMEOUT_MS) != osOK)
+    {
+        return -2;
+    }
+
+    MotorDriver* driver = instance->driver;
+
+    // 转速限幅
+    const float targetRpm = CLAMP(rpm, -1 * driver->spec->maxRPM, driver->spec->maxRPM);
+
+    // 设置闭环模式并更新目标
+    MotorDriver_SetMode(driver, MOTOR_DRIVER_MODE_CLOSED_LOOP);
+    MotorDriver_SetTargetRPM(driver, targetRpm);
+
+    osMutexRelease(instance->mutex);
+    return 0;
+}
+
+int MotorService_setOpenLoopDutyCycle(MotorService* service, MotorID motorId, float dutyCycle)
+{
+    if (!service || motorId >= MOTOR_MAX_NUM)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Invalid instance or motor id!");
+        return -1;
+    }
+
+    MotorInstance* instance = &service->instances[motorId];
+    if (osMutexAcquire(instance->mutex, LOCK_TIMEOUT_MS) != osOK)
+    {
+        return -2;
+    }
+
+    MotorDriver* driver = instance->driver;
 
     // 参数限幅
-    ctrl->status.target.linear_speed = CLAMP(linear,
-                                             -ctrl->config.max_linear_speed,
-                                             ctrl->config.max_linear_speed);
+    const float clampedDuty = CLAMP(dutyCycle, -100.0f, 100.0f);
 
-    ctrl->status.target.angular_speed = CLAMP(angular,
-                                              -ctrl->config.max_angular_speed,
-                                              ctrl->config.max_angular_speed);
+    // 设置开环模式并更新占空比
+    MotorDriver_SetMode(driver, MOTOR_DRIVER_MODE_OPEN_LOOP);
+    MotorDriver_SetDutyCycle(driver, clampedDuty);
 
-    // 更新PID目标值
-    ctrl->linear_pid.setpoint = ctrl->status.target.linear_speed;
-    ctrl->angular_pid.setpoint = ctrl->status.target.angular_speed;
+    // 更新状态
+    instance->state.velocity.rpm = 0; // 开环模式下转速未知
+    instance->state.velocity.mps = 0;
+    instance->state.mode = MOTOR_DRIVER_MODE_OPEN_LOOP;
+    instance->state.openLoopDuty = clampedDuty;
 
-    // 计算电机目标转速
-    CalculateWheelSpeeds(ctrl);
+    osMutexRelease(instance->mutex);
+    return 0;
 }
 
-/* 紧急停止 */
-void MotionController_emergencyStop(MotionController* ctrl)
+int MotorService_emergencyStop(MotorService* service, MotorID motorId)
 {
-    if (!ctrl) return;
-
-    PID_Reset(&ctrl->linear_pid);
-    PID_Reset(&ctrl->angular_pid);
-
-    // 设置错误标志位
-    ctrl->status.system.error_code |= 0x80000000; // 最高位表示急停
-
-    // 停止电机输出
-    Motor_EmergencyStop(ctrl->left);
-    Motor_EmergencyStop(ctrl->right);
-}
-
-/* 状态更新 */
-void MotionController_Update(MotionController* ctrl, const float delta_time)
-{
-    if (!ctrl || delta_time <= 0.0f) return;
-
-    // 1. 安全检测
-    CheckSystemHealth(ctrl);
-
-    // 2. 更新底层驱动状态
-    Motor_Update(ctrl->left);
-    Motor_Update(ctrl->right);
-
-    // 3. 计算实际运动状态
-    UpdateActualStates(ctrl, delta_time);
-
-    // 4. 闭环控制逻辑
-    if (!(ctrl->status.system.error_code & 0x80000000))
+    if (!service || motorId >= MOTOR_MAX_NUM)
     {
-        ApplyControlLogic(ctrl, delta_time);
+        LOG_ERROR(LOG_MODULE_MOTOR, "MotorService_emergencyStop: invalid instance or motor id!");
+        return -1;
+    }
+
+    MotorInstance* instance = &service->instances[motorId];
+    if (osMutexAcquire(instance->mutex, LOCK_TIMEOUT_MS) != osOK)
+    {
+        return -2;
+    }
+
+    MotorDriver_EmergencyStop(instance->driver);
+
+    // 状态更新
+    instance->state.errorCode = MOTOR_ERR_EMERGENCY_STOP;
+    instance->state.velocity.rpm = 0;
+    instance->state.velocity.mps = 0;
+
+    osMutexRelease(instance->mutex);
+    return 0;
+}
+
+void MotorService_updateState(MotorService* service)
+{
+    if (!service)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "MotorService_updateState: invalid instance");
+        return;
+    }
+
+    for (int i = 0; i < MOTOR_MAX_NUM; ++i)
+    {
+        MotorInstance* instance = &service->instances[i];
+        if (osMutexAcquire(instance->mutex, LOCK_TIMEOUT_MS) != osOK)
+        {
+            continue;
+        }
+        // 驱动状态更新
+        MotorDriver_Update(instance->driver);
+        const MotorDriverState driverState = MotorDriver_GetState(instance->driver);
+        // 更新速度
+        instance->state.velocity.rpm = driverState.velocity.rpm;
+        instance->state.velocity.mps = driverState.velocity.mps;
+        // 更新累计值
+        instance->state.position.revolutions = driverState.position.revolutions;
+        instance->state.position.odometer = calculateOdometer(
+            instance->state.position.revolutions,
+            instance->driver->spec->wheelRadiusMM
+        );
+        // 更新控制模式
+        instance->state.mode = instance->driver->control.mode;
+        // 开环模式下记录占空比
+        if (instance->driver->control.mode == MOTOR_DRIVER_MODE_OPEN_LOOP)
+        {
+            instance->state.openLoopDuty = driverState.openLoopDuty;
+        }
+
+        // 更新时间戳
+        instance->state.lastUpdate = HAL_GetTick();
+
+        osMutexRelease(instance->mutex);
     }
 }
 
-/* 获取状态 */
-MotionStatus* MotionController_getStatus(MotionController* ctrl)
+MotorState MotorService_getState(MotorService* service, MotorID motorId)
 {
-    return ctrl ? &ctrl->status : NULL;
-}
-
-/******************** 静态函数实现 ********************/
-
-/* 计算轮速目标值 */
-static void CalculateWheelSpeeds(MotionController* ctrl)
-{
-    const float L = ctrl->config.wheel_base;
-    const float R = ctrl->config.wheel_radius;
-
-    // 差速计算
-    const float v_left = ctrl->status.target.linear_speed - (L / 2) * ctrl->status.target.angular_speed;
-    const float v_right = ctrl->status.target.linear_speed + (L / 2) * ctrl->status.target.angular_speed;
-
-    // 转换为RPM
-    const float left_rpm = (float)(v_left / (2 * M_PI * R)) * 60.0f;
-    const float right_rpm = (float)(v_right / (2 * M_PI * R)) * 60.0f;
-
-    // 设置电机目标
-    Motor_SetTargetRPM(ctrl->left, left_rpm);
-    Motor_SetTargetRPM(ctrl->right, right_rpm);
-}
-
-/* 更新实际状态 */
-static void UpdateActualStates(MotionController* ctrl, const float delta_time)
-{
-    // 获取电机实际转速
-    const float left_rpm = ctrl->left->state.rpm;
-    const float right_rpm = ctrl->right->state.rpm;
-    const float R = ctrl->config.wheel_radius;
-    const float L = ctrl->config.wheel_base;
-
-    // 计算实际线速度
-    ctrl->status.actual.linear_speed =
-        (left_rpm + right_rpm) * (2.0f * (float)M_PI * R) / 120.0f;
-
-    // 计算实际角速度
-    ctrl->status.actual.angular_speed =
-        (right_rpm - left_rpm) * (2.0f * (float)M_PI * R) / (L * 60.0f);
-
-    // 更新累计里程
-    ctrl->status.actual.odometer += fabsf(ctrl->status.actual.linear_speed) * delta_time;
-
-    // 同步系统状态
-    // ctrl->status.system.voltage = SafetyMonitor_GetVoltage();
-}
-
-/* 应用控制算法 */
-static void ApplyControlLogic(MotionController* ctrl, const float delta_time)
-{
-    // ================ 1. 计算线速度PID输出 ================
-    const float linear_output = PID_Calculate(
-        &ctrl->linear_pid,
-        ctrl->status.actual.linear_speed, // 当前实际线速度作为测量值
-        delta_time
-    );
-
-    // ================ 2. 计算角速度PID输出 ================
-    const float angular_output = PID_Calculate(
-        &ctrl->angular_pid,
-        ctrl->status.actual.angular_speed, // 当前实际角速度作为测量值
-        delta_time
-    );
-
-    // ================ 3. 合成新的目标速度 ================
-    const float new_linear = ctrl->status.target.linear_speed + linear_output;
-    const float new_angular = ctrl->status.target.angular_speed + angular_output;
-
-    // ================ 4. 目标速度限幅 ================
-    ctrl->status.target.linear_speed = CLAMP(new_linear,
-        -ctrl->config.max_linear_speed,
-        ctrl->config.max_linear_speed
-    );
-    ctrl->status.target.angular_speed = CLAMP(new_angular,
-        -ctrl->config.max_angular_speed,
-        ctrl->config.max_angular_speed
-    );
-
-    // ================ 5. 转换为轮速目标 ================
-    CalculateWheelSpeeds(ctrl);
-}
-
-/* 系统健康检查 */
-static void CheckSystemHealth(MotionController* ctrl)
-{
-    uint32_t errors = 0;
-
-    // 聚合电机错误
-    if (ctrl->left->state.error_code) errors |= 0x01;
-    if (ctrl->right->state.error_code) errors |= 0x02;
-
-    // 电压检测
-    if (ctrl->status.system.voltage < 10.5f) errors |= 0x04;
-    if (ctrl->status.system.voltage > 14.5f) errors |= 0x08;
-
-    // 温度检测
-    if (ctrl->status.system.temperature > 85.0f) errors |= 0x10;
-
-    // 更新错误码（保留最高位为急停标志）
-    ctrl->status.system.error_code = (ctrl->status.system.error_code & 0x80000000) | errors;
-
-    // 触发急停条件
-    if (errors != 0)
+    const MotorState emptyState = {0};
+    if (!service || motorId >= MOTOR_MAX_NUM)
     {
-        MotionController_emergencyStop(ctrl);
+        LOG_ERROR(LOG_MODULE_MOTOR, "MotorService_getState: invalid instance or motor id!");
+        return emptyState;
     }
+
+    MotorInstance* instance = &service->instances[motorId];
+    if (osMutexAcquire(instance->mutex, LOCK_TIMEOUT_MS) != osOK)
+    {
+        return emptyState;
+    }
+    MotorState stateCopy = {0};
+    memcpy(&stateCopy, &instance->state, sizeof(MotorState));
+
+    osMutexRelease(instance->mutex);
+    return stateCopy;
+}
+
+int MotorService_configurePID(MotorService* service, MotorID motorId, const PID_Params* pidParams)
+{
+    if (!service || motorId >= MOTOR_MAX_NUM)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "MotorService_configurePID: invalid instance or motor id!");
+        return -1;
+    }
+    if (!pidParams)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "PID params is NULL!");
+        return -1;
+    }
+
+    MotorInstance* instance = &service->instances[motorId];
+    if (osMutexAcquire(instance->mutex, LOCK_TIMEOUT_MS) != osOK)
+    {
+        return -2;
+    }
+    // 参数校验
+    if (pidParams->kp < 0 || pidParams->ki < 0 || pidParams->kd < 0)
+    {
+        instance->state.errorCode |= MOTOR_ERR_INVALID_PARAM;
+
+        osMutexRelease(instance->mutex);
+        return -1;
+    }
+
+    // 应用新参数
+    MotorDriver_ConfigurePID(instance->driver, pidParams);
+
+    osMutexRelease(instance->mutex);
+    return 0;
+}
+
+static float calculateOdometer(const float revolutions, const float wheelRadiusMM)
+{
+    return revolutions * (2.0f * (float)M_PI) * (wheelRadiusMM / 1000.0f);
 }

@@ -11,9 +11,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// 使用Q格式定点数优化
-#define Q_SCALE 1000  // 3位小数精度
-
 #pragma pack(push, 1)
 
 /*---------------------- 控制掩码定义 ----------------------*/
@@ -27,48 +24,54 @@ typedef enum
 /*---------------------- 高层运动控制定义 ----------------------*/
 typedef enum
 {
-    MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
-    MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
-    MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
-    MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
-    MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
-    MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
-} MotionCtrlMode;
+    CMD_MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
+    CMD_MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
+    CMD_MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
+    CMD_MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
+    CMD_MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
+    CMD_MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
+} MotionMode;
 
-// 运动学控制参数
+// 差速控制参数（兼容混合模式）
 typedef struct
 {
-    int16_t linear_vel;  // 线速度  Q16.15格式（m/s） 前向为正
-    int16_t angular_vel; // 角速度 Q16.15格式（rad/s） 逆时针为正
-    int16_t steer_angle; // 前轮转角 Q8.7格式（-90.00~+90.00）
-    int16_t curvature;   // 路径曲率 (1/m) [可选]
-} KinematicParam;
+    int32_t linearVel;  // Q16.16 (m/s)
+    int32_t angularVel; // Q16.16 (rad/s)
+} DiffCtrlParam;
 
 // 直接控制参数
 typedef struct
 {
-    int16_t steer_angle; // 舵机角度 (0-180)
-    int16_t left_speed;  // 左电机速度 m/s
-    int16_t right_speed; // 右电机速度 m/s
+    int32_t leftRpm;    // Q16.16 (RPM)
+    int32_t rightRpm;   // Q16.16 (RPM)
+    int16_t steerAngle; // Q8.7 (deg)
 } DirectCtrlParam;
 
+// 阿克曼转向参数
 typedef struct
 {
-    float angular_vel; // rad/s
-    uint8_t direction; // 0:CCW, 1:CW
-    float radius;      // 旋转半径（0=原地）
-} SpinParam;
+    int32_t linearVel;  // Q16.16 (m/s)
+    int16_t steerAngle; // Q8.7 (deg)
+} AckermannParam;
 
+// 混合控制参数
+typedef struct
+{
+    DiffCtrlParam base;       // 基础差速参数
+    int16_t steerAngle;       // Q8.7 (deg)
+    uint8_t differentialGain; // 0-255映射0.0-1.0
+} MixedCtrlParam;
 
 // 运动控制主指令
 typedef struct
 {
-    MotionCtrlMode mode; // 运动模式
+    MotionMode mode; // 运动模式
     union
     {
-        KinematicParam kinematic;
-        DirectCtrlParam direct;
-        SpinParam spin;
+        AckermannParam kinematicCtrl;
+        DirectCtrlParam directCtrl;
+        MixedCtrlParam mixedCtrl;
+        DiffCtrlParam diffCtrl;
     } params;
 
     uint16_t duration; // 执行持续时间（ms）
@@ -87,7 +90,7 @@ typedef struct
 /*---------------------- 主控制指令 ----------------------*/
 typedef struct
 {
-    uint8_t ctrl_id;   // 控制器ID
+    uint8_t ctrlId;    // 控制器ID
     uint8_t fields;    // 控制字段（位掩码组合）
     MotionCmd motion;  // 运动控制参数
     PingText pingText; // 调试信息 debug

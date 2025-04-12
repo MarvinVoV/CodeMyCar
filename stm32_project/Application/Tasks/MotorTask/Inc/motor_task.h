@@ -10,7 +10,7 @@
 
 #include "motor_service.h"
 
-void MotorTask_init(MotionController* motion_controller);
+void MotorTask_init(MotorService* motorService);
 void MotorTask_doTask(void* arg);
 
 #endif /* TASKS_MOTORTASK_INC_MOTOR_TASK_H_ */

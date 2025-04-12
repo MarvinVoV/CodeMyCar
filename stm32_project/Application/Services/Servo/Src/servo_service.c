@@ -6,130 +6,339 @@
  */
 #include "servo_service.h"
 
-#include "cmsis_os.h"
+#include <error_code.h>
+
+#include "cmsis_os2.h"
 #include "log_manager.h"
 #include "servo_task.h"
 
+static bool checkPositionReached(const SteerInstance* inst);
+static void handleCalibratingState(SteerInstance* inst);
+static int handleMovingState(SteerInstance* inst);
 
-void ServoService_init(ServoInstance* instance)
+SteerInstance* SteerService_init(SteerConfig* config, ServoDriver* driver)
 {
-    if (instance == NULL || instance->driver == NULL)
+    if (!config || !driver)
     {
-        LOG_ERROR(LOG_MODULE_SERVO, "Invalid instance or driver");
-        return;
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid config or driver");
+        return NULL;
     }
 
-    if (instance->config == NULL)
+    // 分配实例内存
+    SteerInstance* inst = (SteerInstance*)malloc(sizeof(SteerInstance));
+    if (!inst)
     {
-        if (instance->config == NULL)
-        {
-            static InstanceConfig defaultConfig = {
-                .minAngle = 0,
-                .maxAngle = 180,
-                .smoothStep = 2,
-                .updateInterval = 5,
-                .baseDelayMs = 10,
-                .deadZone = 2
-            };
-            instance->config = &defaultConfig;
-        }
+        LOG_ERROR(LOG_MODULE_SERVO, "Failed to allocate memory for instance");
+        return NULL;
     }
 
-    instance->driver->hw->minAngle = instance->config->minAngle;
-    instance->driver->hw->maxAngle = instance->config->maxAngle;
+    // 初始化配置
+    memcpy(&inst->config, config, sizeof(SteerConfig));
+    inst->driver = driver;
+
+    // 初始化运行时状态
+    inst->state.actualAngleDeg = 0.0f;
+    inst->state.targetAngleDeg = 0.0f;
+    inst->state.lastUpdateTick = 0;
+    inst->state.motionState = STEER_STATE_IDLE;
+    inst->state.errorCode = 0;
+
+    // 初始化平滑控制
+    inst->smoothCtrl.startAngleDeg = 0.0f;
+    inst->smoothCtrl.remainingDeg = 0.0f;
+    inst->smoothCtrl.stepDeg = 0.0f;
+
+    inst->calibCtrl.calibPhase = 0;
+    inst->calibCtrl.calibStartAngle = 0.0f;
+
+    // 创建互斥锁
+    inst->mutex = osMutexNew(NULL);
+    if (!inst->mutex)
+    {
+        free(inst);
+        return NULL;
+    }
 
     // 调用驱动层初始化函数
-    ServoDriver_Init(instance->driver);
+    if (ServoDriver_Init(inst->driver) != ERR_SUCCESS)
+    {
+        free(inst);
+        return NULL;
+    }
 
     // 创建任务
-    ServoTask_init(instance);
+    ServoTask_init(inst);
+    return inst;
 }
 
-void ServoService_setAngleSmoothly(ServoInstance* instance, const int angle, uint16_t speedMs)
+int SteerService_setAngleSmoothly(SteerInstance* instance, float targetAngle, uint16_t speedMs)
 {
-    if (!instance || !instance->driver) return;
-    // 角度限幅
-    const int targetAngle = CLAMP(angle, instance->config->minAngle, instance->config->maxAngle);
-
-    // 角度未发生变化，直接返回
-    if (instance->currentAngle == targetAngle) return;
-
-    // 死区检测
-    const int delta = abs(targetAngle - instance->currentAngle);
-    if (delta <= instance->config->deadZone)
+    if (!instance || !instance->driver)
     {
-        if (instance->targetAngle != instance->currentAngle)
-        {
-            // 若之前处于移动状态，需要同步目标值
-            instance->targetAngle = instance->currentAngle;
-        }
-        return;
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid instance or driver");
+        return ERR_INVALID_PARAM;
     }
-    if (speedMs > 0)
+    osMutexAcquire(instance->mutex, osWaitForever);
+
+    /*--------------------- 参数预处理 ---------------------*/
+    // 角度限幅（浮点版本）
+    const float clampedAngle = fmaxf(instance->config.minAngleDeg,
+                                     fminf(targetAngle, instance->config.maxAngleDeg));
+
+    // 计算角度差（浮点）
+    const float delta = clampedAngle - instance->state.actualAngleDeg;
+
+    // 死区判断（浮点容差）
+    if (fabsf(delta) <= instance->config.deadZoneDeg)
     {
-        speedMs = SERVO_DEFAULT_SPEED_MS;
+        osMutexRelease(instance->mutex);
+        return ERR_SUCCESS;
     }
 
-    // 计算动态步长（速度越快步长越大）
-    const int smoothStep = instance->config->smoothStep;
-    const uint16_t updateInterval = instance->config->updateInterval;
+    /*--------------------- 动态步长计算 ---------------------*/
+    // 计算总耗时（毫秒）
+    const float effectiveSpeed = (speedMs == 0) ? (float)SERVO_DEFAULT_SPEED_MS : (float)speedMs;
+    const float totalDurationMs = fabsf(delta) * effectiveSpeed;
 
-    // 动态步长计算
-    const uint32_t totalTime = delta * speedMs;
-    const uint32_t cycleCount = totalTime / updateInterval;
-    instance->stepSize = (cycleCount > 0) ? (int)ceil((double)delta / cycleCount) : smoothStep;
+    // 计算周期数（ 显式转换为浮点数）
+    const float intervalMs = (float)instance->config.updateIntervalMs;
+    const float cycleCount = ceilf(totalDurationMs / intervalMs);
 
-    // 步长保护:不超过smoothStep且不小于1
-    instance->stepSize = CLAMP(instance->stepSize, 1, instance->config->smoothStep);
+    // 计算步长（保留浮点精度）
+    float dynamicStep = delta / cycleCount;
 
+    // 步长限幅（支持亚角度级步长）
+    const float maxStep = instance->config.defaultStepDeg;
+    dynamicStep = copysign(fminf(fabsf(dynamicStep), maxStep), delta);
 
-    // 更新目标状态
-    instance->targetAngle = targetAngle;
-    instance->initAngle = instance->currentAngle;
+    /*--------------------- 更新控制上下文 ---------------------*/
+    instance->state.targetAngleDeg = clampedAngle;
 
-    // 立即更新一次
-    ServoService_update(instance);
+    // 平滑控制上下文（全浮点）
+    instance->smoothCtrl = (SmoothControlContext){
+        .startAngleDeg = instance->state.actualAngleDeg,
+        .remainingDeg = delta, // 剩余总角度（非步数）
+        .stepDeg = dynamicStep // 单步角度（可小于1度）
+    };
+
+    // 状态机更新
+    instance->state.motionState = STEER_STATE_MOVING;
+    instance->state.lastUpdateTick = HAL_GetTick();
+
+    // 立即触发首次更新
+    SteerService_update(instance);
+
+    osMutexRelease(instance->mutex);
+    return ERR_SUCCESS;
 }
 
-int ServoService_update(ServoInstance* instance)
+int SteerService_update(SteerInstance* instance)
 {
-    if (!instance || !instance->driver) return -1;
-
+    if (!instance || !instance->driver)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid instance or driver");
+        return ERR_INVALID_PARAM;
+    }
     const uint32_t now = HAL_GetTick();
-    const uint32_t lastUpdate = instance->lastUpdate;
-    const uint16_t updateInterval = instance->config->updateInterval;
-
-    if ((now - lastUpdate) < updateInterval)
+    if (now - instance->state.lastUpdateTick < instance->config.updateIntervalMs)
     {
-        return instance->currentAngle;
+        return ERR_STEER_TOO_FREQUENT;
     }
-    instance->lastUpdate = now;
+    osMutexAcquire(instance->mutex, osWaitForever);
 
-    // 到达目标
-    if (instance->currentAngle == instance->targetAngle)
+    if (instance->state.motionState != STEER_STATE_MOVING)
     {
-        return instance->currentAngle;
+        osMutexRelease(instance->mutex);
+        return ERR_SUCCESS;
     }
 
-    // 计算移动方向和步长
-    const int delta = instance->targetAngle - instance->currentAngle;
-    const int direction = (delta > 0) ? 1 : -1;
-    const int step = abs(delta) > instance->stepSize ? instance->stepSize * direction : delta;
-    instance->currentAngle += step;
+    // 错误状态优先处理
+    if (instance->state.errorCode != 0)
+    {
+        osMutexRelease(instance->mutex);
+        return ERR_SUCCESS;
+    }
+    /*--------- 状态机处理 ---------*/
+    switch (instance->state.motionState)
+    {
+        case STEER_STATE_MOVING:
+            handleMovingState(instance);
+            break;
 
-    ServoDriver_setAngle(instance->driver, instance->currentAngle);
-    return instance->currentAngle;
+        case STEER_STATE_CALIBRATING:
+            handleCalibratingState(instance);
+            break;
+
+        case STEER_STATE_IDLE:
+        default:
+            // 无操作
+            break;
+    }
+
+    /*--------- 更新最后活动时间 ---------*/
+    instance->state.lastUpdateTick = HAL_GetTick();
+
+    osMutexRelease(instance->mutex);
+    return ERR_SUCCESS;
 }
 
-void ServoService_setAngleImmediate(ServoInstance* instance, const int angle)
+int SteerService_setAngleImmediate(SteerInstance* instance, const float angle)
 {
-    if (!instance || !instance->driver) return;
-    // 角度限幅
-    const int targetAngle = CLAMP(angle, instance->config->minAngle, instance->config->maxAngle);
-    // 直接更新所有状态
-    instance->targetAngle = targetAngle;
-    instance->currentAngle = targetAngle;
-    instance->initAngle = targetAngle;
+    if (!instance || !instance->driver)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid instance or driver");
+        return ERR_INVALID_PARAM;
+    }
+    osMutexAcquire(instance->mutex, osWaitForever);
+    /*--------------------- 角度处理 ---------------------*/
+    // 浮点角度限幅（兼容原整型配置）
+    const float minAngle = (float)instance->config.minAngleDeg;
+    const float maxAngle = (float)instance->config.maxAngleDeg;
+    const float clampedAngle = fmaxf(fminf(angle, maxAngle), minAngle);
 
-    ServoDriver_setAngle(instance->driver, instance->currentAngle);
+    // 更新状态（全浮点模型）
+    instance->state.targetAngleDeg = clampedAngle;
+    instance->state.actualAngleDeg = clampedAngle;
+
+    // 立即驱动硬件
+    const int err = ServoDriver_setAngle(instance->driver, clampedAngle);
+    if (err != ERR_SUCCESS)
+    {
+        osMutexRelease(instance->mutex);
+        LOG_ERROR(LOG_MODULE_SERVO, "ServoDriver_setAngle failed");
+        return err;
+    }
+
+    // 清除平滑控制上下文
+    memset(&instance->smoothCtrl, 0, sizeof(SmoothControlContext));
+
+    // 更新状态
+    instance->state.motionState = STEER_STATE_IDLE;
+    instance->state.lastUpdateTick = HAL_GetTick();
+
+    osMutexRelease(instance->mutex);
+    return ERR_SUCCESS;
+}
+
+// 紧急停止
+void SteerService_ForceStop(SteerInstance* inst)
+{
+    if (!inst) return;
+
+    osMutexAcquire(inst->mutex, osWaitForever);
+
+    // 立即停止运动
+    inst->smoothCtrl.remainingDeg = 0;
+    inst->smoothCtrl.stepDeg = 0;
+    inst->smoothCtrl.startAngleDeg = 0;
+    inst->state.motionState = STEER_STATE_IDLE;
+
+    // 同步硬件角度
+    const int err = ServoDriver_emergencyStop(inst->driver);
+    if (err != ERR_SUCCESS)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "ServoDriver_emergencyStop failed");
+    }
+
+    osMutexRelease(inst->mutex);
+}
+
+// 获取当前状态快照（线程安全）
+SteerState SteerService_GetState(const SteerInstance* inst)
+{
+    SteerState state = {0};
+    if (!inst) return state;
+
+    osMutexAcquire(inst->mutex, osWaitForever);
+    memcpy(&state, &inst->state, sizeof(SteerState));
+    osMutexRelease(inst->mutex);
+
+    return state;
+}
+
+/*--------------------- 运动状态处理函数 ---------------------*/
+static int handleMovingState(SteerInstance* inst)
+{
+    SmoothControlContext* ctrl = &inst->smoothCtrl;
+
+    // 计算实际步长（考虑剩余角度和步长限制）
+    const float actualStep = copysign(
+        fminf(fabsf(ctrl->remainingDeg), fabsf(ctrl->stepDeg)),
+        ctrl->remainingDeg
+    );
+
+    // 更新实际角度
+    inst->state.actualAngleDeg += actualStep;
+    // // 改为基于起始角度和剩余时间的计算模型
+    // const float progress = 1.0f - (ctrl->remainingDeg / delta);
+    // inst->state.actualAngleDeg = ctrl->startAngleDeg + delta * progress;
+
+    ctrl->remainingDeg -= actualStep;
+
+    // 硬件驱动
+    int err = ServoDriver_setAngle(inst->driver, inst->state.actualAngleDeg);
+    if (err != ERR_SUCCESS)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "ServoDriver_setAngle failed");
+        return err;
+    }
+
+    /*--------------------- 终点判断 ---------------------*/
+    if (fabsf(ctrl->remainingDeg) <= inst->config.deadZoneDeg)
+    {
+        // 强制对齐目标角度（消除累积误差）
+        inst->state.actualAngleDeg = inst->state.targetAngleDeg;
+        inst->state.motionState = STEER_STATE_IDLE;
+
+        // 最终位置同步
+        err = ServoDriver_setAngle(inst->driver, inst->state.actualAngleDeg);
+        if (err != ERR_SUCCESS)
+        {
+            LOG_ERROR(LOG_MODULE_SERVO, "ServoDriver_setAngle failed");
+            return err;
+        }
+    }
+
+    return ERR_SUCCESS;
+}
+
+static void handleCalibratingState(SteerInstance* inst)
+{
+    switch (inst->calibCtrl.calibPhase)
+    {
+        case 0: // 移动至最大角度
+            ServoDriver_setAngle(inst->driver, inst->config.maxAngleDeg);
+            if (checkPositionReached(inst))
+            {
+                inst->calibCtrl.calibPhase++;
+            }
+            break;
+
+        case 1: // 记录最大值
+            inst->config.maxAngleDeg = inst->state.actualAngleDeg;
+            inst->calibCtrl.calibPhase++;
+            break;
+
+        case 2: // 移动至最小角度
+            ServoDriver_setAngle(inst->driver, inst->config.minAngleDeg);
+            if (checkPositionReached(inst))
+            {
+                inst->calibCtrl.calibPhase++;
+            }
+            break;
+
+        case 3: // 记录最小值
+            inst->config.minAngleDeg = inst->state.actualAngleDeg;
+            inst->state.motionState = STEER_STATE_IDLE;
+            inst->calibCtrl.calibPhase = 0;
+            break;
+    }
+}
+
+/*--------------------- 辅助函数 ---------------------*/
+static bool checkPositionReached(const SteerInstance* inst)
+{
+    // 实际角度与目标角度偏差在死区范围内视为到达
+    const float delta = fabsf(inst->state.targetAngleDeg - inst->state.actualAngleDeg);
+    return (delta <= inst->config.deadZoneDeg);
 }

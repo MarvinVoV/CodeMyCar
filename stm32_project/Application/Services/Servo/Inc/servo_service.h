@@ -8,6 +8,7 @@
 #ifndef SERVICES_SERVO_INC_SERVO_SERVICE_H_
 #define SERVICES_SERVO_INC_SERVO_SERVICE_H_
 
+#include "cmsis_os2.h"
 #include "ctrl_protocol.h"
 #include "servo_driver.h"
 #include "sys_utils.h"
@@ -15,55 +16,127 @@
 // 默认移动速度 200ms/度
 #define SERVO_DEFAULT_SPEED_MS 200
 
+/*--------------------- 配置参数 ---------------------*/
 typedef struct
 {
-    int minAngle;            // 最小角度
-    int maxAngle;            // 最大角度
-    uint16_t smoothStep;     // 平滑步长（每次更新的步长）
-    uint16_t updateInterval; // 更新间隔(ms)
-    uint16_t baseDelayMs;    // 更新间隔ms (建议5-20ms)
-    uint16_t deadZone;       // 死区度数
-} InstanceConfig;
+    float minAngleDeg;         // 机械最小角度（度）
+    float maxAngleDeg;         // 机械最大角度（度）
+    float deadZoneDeg;         // 死区角度（度）
+    float defaultStepDeg;      // 默认单步角度（度）
+    uint16_t updateIntervalMs; // 控制周期（毫秒）
+} SteerConfig;
 
+/*--------------------- 运行时状态 ---------------------*/
+// 运动状态枚举
+typedef enum
+{
+    STEER_STATE_IDLE = 0x01, // 空闲状态
+    STEER_STATE_MOVING,      // 运动中
+    STEER_STATE_ERROR,       // 错误状态
+    STEER_STATE_CALIBRATING  // 校准中
+} SteerMotionState;
 
 typedef struct
 {
-    ServoDriver* driver;    // 硬件配置
-    InstanceConfig* config; // 实例配置
-    int targetAngle;        // 目标角度
-    int currentAngle;       // 当前角度
-    int initAngle;          // 运动起始角度
-    int stepSize;           // 步长 默认 1 度
-    uint32_t lastUpdate;    // 上次更新的时间
-} ServoInstance;
+    float actualAngleDeg;    // 实际角度（度）
+    float targetAngleDeg;    // 目标角度（度）
+    uint32_t lastUpdateTick; // 最后更新时间戳
+    uint16_t motionState;    // 运动状态枚举值
+    uint32_t errorCode;      // 错误码
+} SteerState;
 
+typedef struct
+{
+    float startAngleDeg; // 起始角度（浮点精度）
+    float remainingDeg;  // 剩余角度（度）替代步数
+    float stepDeg;       // 单步角度（可小于1度）
+} SmoothControlContext;
+
+typedef struct
+{
+    // 硬件层依赖
+    ServoDriver* driver;
+
+    // 配置参数（初始化后只读）
+    SteerConfig config;
+
+    // 运行时状态
+    SteerState state;
+
+    // 平滑控制上下文
+    SmoothControlContext smoothCtrl;
+
+    struct
+    {
+        uint8_t calibPhase;
+        float calibStartAngle;
+    } calibCtrl; // 校准状态
+
+    osMutexId_t mutex;
+} SteerInstance;
 
 /**
- * @brief 初始化舵机服务
- * @param instance instance
+ * @brief 初始化舵机控制服务实例
+ * @param config 舵机配置参数（机械参数、控制参数等），必须非空
+ * @param driver 硬件驱动接口实现，必须非空
+ * @return SteerInstance* 成功返回实例指针，失败返回NULL
+ * @note 此函数会动态分配内存，使用后需调用 SteerService_Deinit 释放资源
  */
-void ServoService_init(ServoInstance* instance);
+SteerInstance* SteerService_init(SteerConfig* config, ServoDriver* driver);
 
 /**
- * @brief 设置目标角度（带平滑移动）
- * @param instance instance
- * @param angle 目标角度
- * @param speedMs 移动速度（ms/度）
+ * @brief 平滑设置舵机角度（亚角度级精度）
+ * @param instance 舵机实例指针
+ * @param angle 目标角度（单位：度，支持小数精度）
+ * @param speedMs 移动速度（单位：毫秒/度，0表示使用默认速度）
+ * @return int 错误码：
+ *   - ERR_SUCCESS 操作成功
+ *   - ERR_INVALID_PARAM 参数无效
+ *   - ERR_ANGLE_OUTOFRANGE 目标角度超出机械限制
+ * @note 实际运动时间 = fabs(目标角度 - 当前角度) * speedMs
  */
-void ServoService_setAngleSmoothly(ServoInstance* instance, const int angle, uint16_t speedMs);
+int SteerService_setAngleSmoothly(SteerInstance* instance, float angle, uint16_t speedMs);
 
 /**
- * @brief 立即设置角度（无平滑）
- * @param instance instance
- * @param angle 目标角度
+ * @brief 立即设置舵机角度（无过渡）
+ * @param instance 舵机实例指针
+ * @param angle 目标角度（单位：度）
+ * @return int 错误码：
+ *   - ERR_SUCCESS 操作成功
+ *   - ERR_INVALID_PARAM 参数无效
+ * @warning 此操作会中断正在进行的平滑运动，直接更新硬件位置
  */
-void ServoService_setAngleImmediate(ServoInstance* instance, const int angle);
+int SteerService_setAngleImmediate(SteerInstance* instance, float angle);
 
 /**
- * @brief 更新舵机状态（需周期调用）
- * @param instance 服务句柄
- * @return 当前角度
+ * @brief 更新舵机控制状态（需周期性调用）
+ * @param instance 舵机实例指针
+ * @return int 错误码：
+ *   - ERR_SUCCESS 状态更新成功
+ *   - ERR_STEER_TOO_FREQUENT 调用过于频繁
+ *   - ERR_HARDWARE_FAILURE 硬件通信失败
+ * @note 建议调用频率与 config.updateIntervalMs 设置一致
  */
-int ServoService_update(ServoInstance* instance);
+int SteerService_update(SteerInstance* instance);
+
+/**
+ * @brief 紧急停止舵机运动
+ * @param inst 舵机实例指针
+ * @note 此操作会：
+ *   1. 立即停止所有运动
+ *   2. 复位平滑控制上下文
+ *   3. 调用驱动层紧急停止函数
+ *   4. 更新状态为 STEER_STATE_IDLE
+ */
+void SteerService_ForceStop(SteerInstance* inst);
+
+/**
+ * @brief 获取当前舵机状态（线程安全）
+ * @param inst 舵机实例指针
+ * @return SteerState 状态快照副本
+ * @warning 返回的结构体是临时拷贝，如需长期使用需自行保存数据
+ */
+SteerState SteerService_GetState(const SteerInstance* inst);
+
 
 #endif /* SERVICES_SERVO_INC_SERVO_SERVICE_H_ */

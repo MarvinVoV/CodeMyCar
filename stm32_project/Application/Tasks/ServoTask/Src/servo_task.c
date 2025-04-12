@@ -12,7 +12,7 @@
 
 static osThreadId_t servoTaskHandle = NULL;
 
-void ServoTask_init(ServoInstance* instance)
+void ServoTask_init(SteerInstance* instance)
 {
     const osThreadAttr_t servoTaskAttributes = {
         .name = "ServoTask",
@@ -29,10 +29,28 @@ void ServoTask_init(ServoInstance* instance)
 
 void ServoTask_doTask(void* pvParameters)
 {
-    ServoInstance* instance = (ServoInstance*)pvParameters;
+    SteerInstance* instance = (SteerInstance*)pvParameters;
+    uint32_t lastWakeTime = osKernelGetTickCount(); // 获取初始基准时间
+
     while (1)
     {
-        ServoService_update(instance);
-        vTaskDelay(pdMS_TO_TICKS(instance->config->updateInterval));
+        // 获取当前配置（线程安全）
+        uint16_t intervalMs;
+        osMutexAcquire(instance->mutex, osWaitForever);
+        intervalMs = instance->config.updateIntervalMs;
+        osMutexRelease(instance->mutex);
+
+
+        /* 执行控制更新 */
+        SteerService_update(instance);
+
+        /* 计算下一次唤醒时间（绝对时间点） */
+        const uint32_t nextWakeTime = lastWakeTime + pdMS_TO_TICKS(intervalMs);
+
+        /* 精确延时到指定时间点（单参数调用） */
+        osDelayUntil(nextWakeTime);
+
+        /* 更新基准时间 */
+        lastWakeTime = nextWakeTime;
     }
 }

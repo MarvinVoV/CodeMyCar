@@ -9,130 +9,119 @@
 #define SERVICES_MOTOR_INC_MOTOR_SERVICE_H_
 #include <stdint.h>
 
+#include "cmsis_os2.h"
 #include "motor_driver.h"
 #include "pid_controller.h"
 
+typedef enum
+{
+    MOTOR_ERR_EMERGENCY_STOP = 0x01,
+    MOTOR_ERR_INVALID_PARAM,
+    MOTOR_ERR_OPEN_LOOP_UNSUPPORTED, // 驱动不支持开环模式
+    MOTOR_ERR_DUTY_OUT_OF_RANGE      // 占空比超限
+} MotorErrorCode;
+
+typedef enum
+{
+    MOTOR_LEFT_WHEEL = 0, // 左轮电机
+    MOTOR_RIGHT_WHEEL,    // 右轮电机
+    MOTOR_MAX_NUM
+} MotorID;
+
 /**
- * @brief 运动控制器配置参数
+ * @brief 电机状态
  */
 typedef struct
 {
-    // 运动学参数
-    float wheel_radius; // 轮半径 (m)
-    float wheel_base;   // 轮距 (m)
+    struct
+    {
+        float mps; // 当前线速度 (m/s)
+        float rpm; // 当前转速角，电机输出轴转速
+    } velocity;
 
-    // 动态限制
-    float max_linear_speed;  // 最大线速度 (m/s)
-    float max_angular_speed; // 最大角速度 (rad/s)
+    struct
+    {
+        float revolutions; // 累计转数
+        float odometer;    // 累计里程 (m)
+    } position;
 
-    PID_Params linear_pid;  // 线速度控制参数
-    PID_Params angular_pid; // 角速度控制参数
-} MotionConfig;
+    // 开环控制状态字段
+    float openLoopDuty;   // 当前占空比（0.0~1.0）
+    MotorDriverMode mode; // 当前控制模式
 
+    uint32_t lastUpdate; // 上次更新时间
+    uint32_t errorCode;  // 错误码
+} MotorState;
 
 /**
- * @brief 运动控制器状态结构体
+ * @brief 电机实例
  */
 typedef struct
 {
-    // ----------- 目标值 -----------
-    struct
-    {
-        float linear_speed;  // 目标线速度 (m/s)
-        float angular_speed; // 目标角速度 (rad/s)
-    } target;
+    MotorDriver* driver; // 电机驱动实例
+    MotorState state;    // 状态信息
+    osMutexId_t mutex;   // 实例级互斥锁
+} MotorInstance;
 
-    // ----------- 实际值 -----------
-    struct
-    {
-        float linear_speed;  // 实际线速度 (m/s)
-        float angular_speed; // 实际角速度 (rad/s)
-        float odometer;      // 累计行驶里程 (m)
-    } actual;
-
-    /* PID控制器状态 */
-    struct
-    {
-        // 线速度PID状态
-        struct
-        {
-            float integral;   // 积分项累计
-            float last_error; // 上一次误差
-        } linear;
-
-        // 角速度PID状态
-        struct
-        {
-            float integral;   // 积分项累计
-            float last_error; // 上一次误差
-        } angular;
-    } pid_state;
-
-    // ----------- 系统状态 -----------
-    struct
-    {
-        uint32_t error_code; // 错误码（整车级）
-        float voltage;       // 系统电压 (V)
-        float temperature;   // 控制器温度 (°C)
-    } system;
-} MotionStatus;
-
-/**
- * @brief 运动控制器核心结构体
- */
 typedef struct
 {
-    MotorDriver* left;          // 左电机驱动实例
-    MotorDriver* right;         // 左电机驱动实例
-    MotionConfig config;        // 控制器配置参数
-    MotionStatus status;        // 当前状态信息
-    PID_Controller linear_pid;  // 线速度PID控制器
-    PID_Controller angular_pid; // 角速度PID控制器
-} MotionController;
+    MotorInstance instances[MOTOR_MAX_NUM]; // 电机实例数组
+    uint32_t controlFreqHz;                 // 控制频率（Hz）
+} MotorService;
 
 /**
- * @brief 初始化运动控制器
- * @param ctrl 控制器实例指针
- * @param left 左电机驱动实例
- * @param right 右电机驱动实例
- * @param config 初始化配置参数
+ * @brief 初始化电机实例
+ * @param service 电机服务层实例
+ * @param leftDriver 左轮驱动实例
+ * @param rightDriver 右轮驱动实例
  *
  * @note 该函数不会分配内存，需确保传入的结构体已正确初始化
  */
-void MotionController_init(MotionController* ctrl, MotorDriver* left, MotorDriver* right, const MotionConfig* config);
+void MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriver* rightDriver);
 
 /**
- * @brief 设置目标运动速度
- * @param ctrl 控制器实例指针
- * @param linear 目标线速度 (m/s)
- * @param angular 目标角速度 (rad/s)
+ * @brief 设置电机实例转速（线程安全）
+ * @param service 电机服务层实例
+ * @param motorId  电机ID
+ * @param rpm 目标转速(转/分钟)
  *
- * @note 实际设置值会被限制在配置的 max_linear_speed 和 max_angular_speed 范围内
  */
-void MotionController_setVelocity(MotionController* ctrl, float linear, float angular);
+int MotorService_setTargetRPM(MotorService* service, MotorID motorId, float rpm);
+/**
+ * @brief 设置电机开环占空比
+ * @param service 电机服务实例
+ * @param motorId 电机ID
+ * @param dutyCycle 占空比（范围：0.0 ~ 1.0）
+ * @return 0成功，负数错误码
+ */
+int MotorService_setOpenLoopDutyCycle(MotorService* service, MotorID motorId, float dutyCycle);
+
 /**
  * @brief 立即执行紧急停止
- * @param ctrl 控制器实例指针
+ * @param service 电机服务层实例
+ * @param motorId  电机ID
  *
  * @warning 该操作会切断电机输出并锁定控制器状态，需手动调用恢复函数
  */
-void MotionController_emergencyStop(MotionController* ctrl);
+int MotorService_emergencyStop(MotorService* service, MotorID motorId);
 
-/**
- * @brief 更新控制器状态（需周期性调用）
- * @param ctrl 控制器实例指针
- * @param delta_time 距离上次更新的时间间隔 (秒)
- *
- * @note 典型调用周期为5-20ms，时间间隔错误可能导致控制异常
- */
-void MotionController_Update(MotionController* ctrl, float delta_time);
+void MotorService_updateState(MotorService* service);
 
 /**
  * @brief 获取当前状态信息（只读）
- * @param ctrl 控制器实例指针
- * @return 指向当前状态结构体的常量指针
+ * @param service 电机服务层实例
+ * @param motorId  电机ID
+ * @return 状态副本
  */
-MotionStatus* MotionController_getStatus(MotionController* ctrl);
+MotorState MotorService_getState(MotorService* service, MotorID motorId);
+
+/**
+ * 动态调整PID参数（通过消息队列）
+ * @param service 电机服务层实例
+ * @param motorId  电机ID
+ * @param pidParams 新的PID参数
+ */
+int MotorService_configurePID(MotorService* service, MotorID motorId, const PID_Params* pidParams);
 
 
 #endif /* SERVICES_MOTOR_INC_MOTOR_SERVICE_H_ */

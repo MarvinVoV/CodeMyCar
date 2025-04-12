@@ -6,73 +6,115 @@
  */
 
 #include "servo_hal.h"
+#include "error_code.h"
 #include "log_manager.h"
 
+#define IS_TIM_APB1_INSTANCE(TIMx) \
+(((TIMx) == TIM2)  || ((TIMx) == TIM3)  || \
+((TIMx) == TIM4)  || ((TIMx) == TIM5)  || \
+((TIMx) == TIM12) || ((TIMx) == TIM13) || \
+((TIMx) == TIM14) || ((TIMx) == TIM6)  || \
+((TIMx) == TIM7))
 
-static HAL_ServoConfig config;
+static uint32_t convertUsToTicks(TIM_HandleTypeDef* tim, uint16_t microseconds);
 
-void ServoHAL_init(HAL_ServoConfig* hardwareConfig)
+int ServoHAL_init(HAL_ServoConfig* config)
 {
-    if (hardwareConfig == NULL || hardwareConfig->pwmTim == NULL)
+    if (!config || !config->pwmTim)
     {
         LOG_ERROR(LOG_MODULE_SERVO, "Invalid servo config");
-        return;
+        return ERR_HAL_SERVO_INVALID_ARG;
     }
-    // 验证定时器配置
-    if (hardwareConfig->minPulse >= hardwareConfig->maxPulse)
+    // 脉冲参数验证
+    if (config->minPulse >= config->maxPulse)
     {
-        LOG_ERROR(LOG_MODULE_SERVO, "Invalid pulse range");
-        return;
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid pulse range: min=%d, max=%d",
+                  config->minPulse, config->maxPulse);
+        return ERR_HAL_SERVO_INVALID_ARG;
     }
 
     // 安全脉冲配置
-    if (hardwareConfig->safetyPulse == 0)
+    if (config->safetyPulse == 0)
     {
-        hardwareConfig->safetyPulse = (hardwareConfig->minPulse + hardwareConfig->maxPulse) / 2;
+        config->safetyPulse = (config->minPulse + config->maxPulse) / 2;
     }
-
 
     // 启动PWM并验证
-    if (HAL_TIM_PWM_Start(hardwareConfig->pwmTim, hardwareConfig->channel) != HAL_OK)
+    if (HAL_TIM_PWM_Start(config->pwmTim, config->channel) != HAL_OK)
     {
         LOG_ERROR(LOG_MODULE_SERVO, "PWM start failed");
-        return;
+        return ERR_HAL_SERVO_FAILURE;
     }
-    memcpy(&config, hardwareConfig, sizeof(HAL_ServoConfig));
+    return ERR_SUCCESS;
 }
 
-bool ServoHAL_setAngle(const int angle)
+int ServoHAL_setPulse(HAL_ServoConfig* config, const uint16_t pulseUs)
 {
-    const int32_t pulseRange = config.maxPulse - config.minPulse;
-    const int targetAngle = CLAMP(angle, config.minAngle, config.maxAngle);
-
-    // 预计算缩放因子避免重复计算
-    const int32_t angleScale = config.maxAngle - config.minAngle;
-    if (angleScale == 0)
+    if (!config || !config->pwmTim)
     {
-        return false;
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid servo config");
+        return ERR_HAL_SERVO_INVALID_ARG;
     }
 
-    // 将角度转换为脉冲宽度 ,计算CCR值
-    uint16_t pulseWidth = config.minPulse +
-        ((pulseRange * (targetAngle - config.minAngle) + angleScale / 2) / angleScale);
+    // 脉冲宽度限幅
+    const uint16_t clampedPulse = CLAMP(pulseUs, config->minPulse, config->maxPulse);
 
-    // LOG_INFO(LOG_MODULE_SERVO, "Setting angle=%d, pulse=%uus", angle, pulse_width);
+    // 转换为定时器时钟周期数
+    const uint32_t targetTicks = convertUsToTicks(config->pwmTim, clampedPulse);
+    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(config->pwmTim);
 
-    // 验证脉冲范围
-    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(config.pwmTim);
-    if (pulseWidth > arr)
+    // 检查ARR溢出
+    if (targetTicks > arr)
     {
-        LOG_WARN(LOG_MODULE_SERVO, "Pulse exceeds ARR");
-        pulseWidth = arr;
+        LOG_WARN(LOG_MODULE_SERVO, "Pulse exceeds ARR: %lu > %lu", targetTicks, arr);
+        return ERR_HAL_SERVO_FAILURE;
     }
 
     // 原子操作设置比较值
-    __HAL_TIM_SET_COMPARE(config.pwmTim, config.channel, pulseWidth);
-    return true;
+    __HAL_TIM_SET_COMPARE(config->pwmTim, config->channel, targetTicks);
+    return ERR_SUCCESS;
 }
 
-void ServoHAL_emergencyStop()
+int ServoHAL_emergencyStop(HAL_ServoConfig* config)
 {
-    __HAL_TIM_SET_COMPARE(config.pwmTim, config.channel, config.safetyPulse);
+    if (!config || !config->pwmTim)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "Invalid servo config");
+        return ERR_HAL_SERVO_INVALID_ARG;
+    }
+
+    // 立即停止PWM输出
+    HAL_TIM_PWM_Stop(config->pwmTim, config->channel);
+    HAL_Delay(5); // 等待 PWM 完全停止
+
+    // 设置安全位置脉冲
+    __HAL_TIM_SET_COMPARE(config->pwmTim, config->channel, convertUsToTicks(config->pwmTim, config->safetyPulse));
+
+    // 重新启动PWM
+    if (HAL_TIM_PWM_Start(config->pwmTim, config->channel) != HAL_OK)
+    {
+        return ERR_HAL_SERVO_FAILURE;
+    }
+    return ERR_SUCCESS;
+}
+
+static uint32_t convertUsToTicks(TIM_HandleTypeDef* tim, uint16_t microseconds)
+{
+    // 1. 获取定时器时钟频率（单位：Hz）
+    uint32_t timerClockHz = HAL_RCC_GetPCLK1Freq();
+
+    // 2. 检查是否需要应用 APB1 预分频补偿
+#if defined(TIM2) || defined(TIM3) || defined(TIM4) || defined(TIM5)
+    if (IS_TIM_APB1_INSTANCE(tim->Instance))
+    {
+        timerClockHz *= 2; // APB1 定时器时钟频率翻倍
+    }
+#endif
+
+    // 3. 计算预分频后的实际时钟频率
+    const uint32_t preScaler = tim->Instance->PSC + 1;
+    const uint32_t timerActualClockHz = timerClockHz / preScaler;
+
+    // 4. 计算 ticks（使用整数运算）
+    return (microseconds * timerActualClockHz) / 1000000U;
 }
