@@ -9,13 +9,9 @@
 #define MODULES_SERVO_INC_SERVO_DRIVER_H_
 
 #include "servo_hal.h"
-#ifndef CLAMP
-#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
-#endif
 
 // 定义舵机相关参数
-#define SERVO_MIN_PULSE 500   // 最小脉冲宽度 (500us)
-#define SERVO_MAX_PULSE 2500  // 最大脉冲宽度 (2500us)
+
 #define SERVO_ANGLE_MIN 0     // 最小角度 (0°)
 #define SERVO_ANGLE_MAX 180   // 最大角度 (180°)
 

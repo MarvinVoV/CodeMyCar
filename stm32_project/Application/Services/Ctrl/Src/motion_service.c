@@ -7,6 +7,7 @@
 #include "motion_service.h"
 #include "log_manager.h"
 #include "error_code.h"
+#include <math.h>
 
 #define LOCK_TIMEOUT_MS 50
 
@@ -175,9 +176,9 @@ MotionCtrlMode MotionService_GetCurrentMode(const MotionContext* ctx)
     }
 
     // 加锁读取（即使基本类型也保证原子性）
-    LOCK(ctx);
+    // LOCK(ctx);
     const MotionCtrlMode currentMode = ctx->motionTarget.mode;
-    UNLOCK(ctx);
+    // UNLOCK(ctx);
 
     return currentMode;
 }
@@ -316,13 +317,13 @@ int MotionService_SetHybridParams(MotionContext* ctx, float linear, float angula
         return MOTION_ERR_INVALID_PARAM;
     }
 
-    osMutexAcquire(ctx->targetMutex, osWaitForever);
+    LOCK(ctx);
 
     // 模式兼容性检查
     if (ctx->motionTarget.mode != MOTION_MIXED_STEER)
     {
         ctx->state.lastError = MOTION_ERR_MODE_MISMATCH;
-        osMutexRelease(ctx->targetMutex);
+        UNLOCK(ctx);
         return MOTION_ERR_MODE_MISMATCH;
     }
 
@@ -349,7 +350,7 @@ int MotionService_SetHybridParams(MotionContext* ctx, float linear, float angula
     ctx->motionTarget.params.mixedCtrl.steerAngle = clampedSteer;
     ctx->motionTarget.params.mixedCtrl.differentialGain = clampedBlend;
 
-    osMutexRelease(ctx->targetMutex);
+    UNLOCK(ctx);
     return ERR_SUCCESS;
 }
 
@@ -716,11 +717,11 @@ static void handleMixedSteering(MotionContext* ctx, const MotionTarget* target)
 
 static void updateRuntimeState(MotionContext* ctx)
 {
-    // 获取电机实例（假设左右电机索引已定义）
+    // 获取电机实例
     MotorInstance* leftMotor = &ctx->motorService->instances[MOTOR_LEFT_WHEEL];
     MotorInstance* rightMotor = &ctx->motorService->instances[MOTOR_RIGHT_WHEEL];
 
-    SteerState steerState = SteerService_GetState(ctx->steerServo);
+    SteerState steerState = SteerService_getState(ctx->steerServo);
 
     /*========== 驱动系统状态更新 ==========*/
     // 左电机状态获取（带锁）

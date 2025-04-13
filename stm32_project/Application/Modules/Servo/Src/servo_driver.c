@@ -6,11 +6,11 @@
  */
 
 #include <stdlib.h>
-#include "cmsis_os.h"
-#include "servo_hal.h"
+#include "cmsis_os2.h"
 #include "servo_driver.h"
 #include "error_code.h"
 #include "log_manager.h"
+#include "macros.h"
 
 int ServoDriver_Init(ServoDriver* driver)
 {
@@ -21,8 +21,8 @@ int ServoDriver_Init(ServoDriver* driver)
     }
 
     // 参数默认值
-    if (driver->hw->minPulse == 0) driver->hw->minPulse = SERVO_MIN_PULSE;
-    if (driver->hw->maxPulse == 0) driver->hw->maxPulse = SERVO_MAX_PULSE;
+    driver->spec.minPulseUs = driver->hw->minPulse;
+    driver->spec.maxPulseUs = driver->hw->maxPulse;
 
     /* --------------------- 规格校验 --------------------- */
     if (driver->spec.maxAngle <= driver->spec.minAngle)
@@ -69,8 +69,11 @@ int ServoDriver_setAngle(ServoDriver* driver, const float angleDeg)
     // 角度限幅 & 量化
     const float clamped = fmaxf(fminf(angleDeg, driver->spec.maxAngle),
                                 driver->spec.minAngle);
-    const float quantized = roundf(clamped / driver->spec.resolutionDeg)
+    float quantized = roundf(clamped / driver->spec.resolutionDeg)
         * driver->spec.resolutionDeg;
+
+    // 量化后再次钳位，避免精度溢出
+    quantized = fmaxf(fminf(quantized, driver->spec.maxAngle), driver->spec.minAngle);
 
     // 脉冲计算
     const float pulseUs = (float)driver->spec.minPulseUs +

@@ -129,7 +129,7 @@ int SteerService_update(SteerInstance* instance)
         return ERR_INVALID_PARAM;
     }
     const uint32_t now = HAL_GetTick();
-    if (now - instance->state.lastUpdateTick < instance->config.updateIntervalMs)
+    if ((now - instance->state.lastUpdateTick) < instance->config.updateIntervalMs)
     {
         return ERR_STEER_TOO_FREQUENT;
     }
@@ -210,7 +210,7 @@ int SteerService_setAngleImmediate(SteerInstance* instance, const float angle)
 }
 
 // 紧急停止
-void SteerService_ForceStop(SteerInstance* inst)
+void SteerService_forceStop(SteerInstance* inst)
 {
     if (!inst) return;
 
@@ -233,7 +233,7 @@ void SteerService_ForceStop(SteerInstance* inst)
 }
 
 // 获取当前状态快照（线程安全）
-SteerState SteerService_GetState(const SteerInstance* inst)
+SteerState SteerService_getState(const SteerInstance* inst)
 {
     SteerState state = {0};
     if (!inst) return state;
@@ -249,20 +249,27 @@ SteerState SteerService_GetState(const SteerInstance* inst)
 static int handleMovingState(SteerInstance* inst)
 {
     SmoothControlContext* ctrl = &inst->smoothCtrl;
+    const float delta = inst->state.targetAngleDeg - ctrl->startAngleDeg;
+    const float totalDistance = fabsf(delta);
+    const float direction = (delta >= 0) ? 1.0f : -1.0f;
+    // 计算经过的时间
+    uint32_t elapsed = HAL_GetTick() - inst->state.lastUpdateTick;
+    const uint32_t maxElapse = inst->config.updateIntervalMs;
+    if (elapsed > maxElapse)
+    {
+        elapsed = maxElapse; // 防止时间累积过大
+    }
 
-    // 计算实际步长（考虑剩余角度和步长限制）
-    const float actualStep = copysign(
-        fminf(fabsf(ctrl->remainingDeg), fabsf(ctrl->stepDeg)),
-        ctrl->remainingDeg
-    );
+    // 计算移动速度
+    const float speedDegPerMs = (float)ctrl->stepDeg / (float)inst->config.updateIntervalMs;
+    const float movedDeg = speedDegPerMs * (float)elapsed;
 
-    // 更新实际角度
-    inst->state.actualAngleDeg += actualStep;
-    // // 改为基于起始角度和剩余时间的计算模型
-    // const float progress = 1.0f - (ctrl->remainingDeg / delta);
-    // inst->state.actualAngleDeg = ctrl->startAngleDeg + delta * progress;
-
-    ctrl->remainingDeg -= actualStep;
+    // 更新剩余距离
+    float remainingDeg = totalDistance - movedDeg;
+    if (remainingDeg < 0.0f) remainingDeg = 0.0f;
+    ctrl->remainingDeg = remainingDeg;
+    // 计算实际角度
+    inst->state.actualAngleDeg = ctrl->startAngleDeg + direction * (totalDistance - remainingDeg);
 
     // 硬件驱动
     int err = ServoDriver_setAngle(inst->driver, inst->state.actualAngleDeg);
@@ -273,7 +280,7 @@ static int handleMovingState(SteerInstance* inst)
     }
 
     /*--------------------- 终点判断 ---------------------*/
-    if (fabsf(ctrl->remainingDeg) <= inst->config.deadZoneDeg)
+    if (remainingDeg <= inst->config.deadZoneDeg)
     {
         // 强制对齐目标角度（消除累积误差）
         inst->state.actualAngleDeg = inst->state.targetAngleDeg;

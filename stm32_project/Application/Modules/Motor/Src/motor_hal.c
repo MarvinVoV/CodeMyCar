@@ -159,20 +159,17 @@ int32_t HAL_Motor_ReadEncoder(HAL_MotorConfig* config)
 
     const uint32_t lastTicks = config->state.encoderTicks;
     const uint32_t currentTicks = __HAL_TIM_GET_COUNTER(config->encoder.tim);
-    /*
-     * 自动识别溢出，例如:
-     * 当计数器从65535溢出到0时，delta = 0 - 65535 = -65535（实际应为+1），但由于int16_t强制类型转换，会修正为+1。
-     */
     int32_t delta = (int32_t)(currentTicks - lastTicks);
-    if (currentTicks < lastTicks && delta < -0x8000) // 16位溢出
-    {
-        {
-            delta = (int32_t)currentTicks + (0x10000 - (int32_t)lastTicks);
-        }
-
-        // 更新编码器累积值
-        config->state.encoderTicks += delta;
-    }
+    // if (currentTicks < lastTicks && delta < -0x8000) // 16位溢出
+    // {
+    //     {
+    //         delta = (int32_t)currentTicks + (0x10000 - (int32_t)lastTicks);
+    //     }
+    //
+    //     // 更新编码器累积值
+    //     config->state.encoderTicks += delta;
+    // }
+    config->state.encoderTicks += delta;
     return config->state.encoderTicks;
 }
 

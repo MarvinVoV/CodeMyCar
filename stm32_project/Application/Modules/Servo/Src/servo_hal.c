@@ -7,18 +7,7 @@
 
 #include "servo_hal.h"
 #include "error_code.h"
-#include "log_manager.h"
-
-#ifndef CLAMP
-#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
-#endif
-
-#define IS_TIM_APB1_INSTANCE(TIMx) \
-(((TIMx) == TIM2)  || ((TIMx) == TIM3)  || \
-((TIMx) == TIM4)  || ((TIMx) == TIM5)  || \
-((TIMx) == TIM12) || ((TIMx) == TIM13) || \
-((TIMx) == TIM14) || ((TIMx) == TIM6)  || \
-((TIMx) == TIM7))
+#include "macros.h"
 
 static uint32_t convertUsToTicks(TIM_HandleTypeDef* tim, uint16_t microseconds);
 
@@ -36,6 +25,18 @@ int ServoHAL_init(HAL_ServoConfig* config)
                   config->minPulse, config->maxPulse);
         return ERR_HAL_SERVO_INVALID_ARG;
     }
+
+    // 校验脉冲范围有效性
+    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(config->pwmTim);
+    const uint32_t minTicks = convertUsToTicks(config->pwmTim, config->minPulse);
+    if (minTicks > arr)
+    {
+        LOG_WARN(LOG_MODULE_SERVO, "Pulse exceeds ARR: %lu > %lu", minTicks, arr);
+        return ERR_HAL_SERVO_FAILURE;
+    }
+
+    if (config->minPulse == 0) config->minPulse = SERVO_MIN_PULSE;
+    if (config->maxPulse == 0) config->maxPulse = SERVO_MAX_PULSE;
 
     // 安全脉冲配置
     if (config->safetyPulse == 0)
@@ -65,14 +66,6 @@ int ServoHAL_setPulse(HAL_ServoConfig* config, const uint16_t pulseUs)
 
     // 转换为定时器时钟周期数
     const uint32_t targetTicks = convertUsToTicks(config->pwmTim, clampedPulse);
-    const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(config->pwmTim);
-
-    // 检查ARR溢出
-    if (targetTicks > arr)
-    {
-        LOG_WARN(LOG_MODULE_SERVO, "Pulse exceeds ARR: %lu > %lu", targetTicks, arr);
-        return ERR_HAL_SERVO_FAILURE;
-    }
 
     // 原子操作设置比较值
     __HAL_TIM_SET_COMPARE(config->pwmTim, config->channel, targetTicks);
@@ -89,7 +82,6 @@ int ServoHAL_emergencyStop(HAL_ServoConfig* config)
 
     // 立即停止PWM输出
     HAL_TIM_PWM_Stop(config->pwmTim, config->channel);
-    HAL_Delay(5); // 等待 PWM 完全停止
 
     // 设置安全位置脉冲
     __HAL_TIM_SET_COMPARE(config->pwmTim, config->channel, convertUsToTicks(config->pwmTim, config->safetyPulse));

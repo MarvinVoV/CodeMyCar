@@ -42,6 +42,7 @@ typedef struct
 // 直接控制参数
 typedef struct
 {
+    // todo 改为整数
     int32_t leftRpm;    // Q16.16 (RPM)
     int32_t rightRpm;   // Q16.16 (RPM)
     int16_t steerAngle; // Q8.7 (deg)

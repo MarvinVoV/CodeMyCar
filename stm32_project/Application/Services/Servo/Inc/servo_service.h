@@ -8,10 +8,10 @@
 #ifndef SERVICES_SERVO_INC_SERVO_SERVICE_H_
 #define SERVICES_SERVO_INC_SERVO_SERVICE_H_
 
+#include <macros.h>
 #include "cmsis_os2.h"
 #include "ctrl_protocol.h"
 #include "servo_driver.h"
-#include "sys_utils.h"
 
 // 默认移动速度 200ms/度
 #define SERVO_DEFAULT_SPEED_MS 200
@@ -130,7 +130,7 @@ int SteerService_update(SteerInstance* instance);
  *   3. 调用驱动层紧急停止函数
  *   4. 更新状态为 STEER_STATE_IDLE
  */
-void SteerService_ForceStop(SteerInstance* inst);
+void SteerService_forceStop(SteerInstance* inst);
 
 /**
  * @brief 获取当前舵机状态（线程安全）
@@ -138,7 +138,7 @@ void SteerService_ForceStop(SteerInstance* inst);
  * @return SteerState 状态快照副本
  * @warning 返回的结构体是临时拷贝，如需长期使用需自行保存数据
  */
-SteerState SteerService_GetState(const SteerInstance* inst);
+SteerState SteerService_getState(const SteerInstance* inst);
 
 
 #endif /* SERVICES_SERVO_INC_SERVO_SERVICE_H_ */

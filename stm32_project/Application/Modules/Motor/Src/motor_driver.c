@@ -114,7 +114,10 @@ static void updateRevolutions(MotorDriverState* state, const int32_t deltaPulses
 static float applySpeedFilter(MotorDriver* driver, float rawSpeed)
 {
     if (driver->filter.speedFilterDepth == 0)
-        return rawSpeed;
+    {
+        // 启用默认滤波（窗口大小5）
+        driver->filter.speedFilterDepth = 5;
+    }
 
     // 更新滤波缓冲区
     driver->filter.speedFilterBuf[driver->filter.filterIndex] = rawSpeed;
@@ -126,7 +129,7 @@ static float applySpeedFilter(MotorDriver* driver, float rawSpeed)
     {
         sum += driver->filter.speedFilterBuf[i];
     }
-    return sum / driver->filter.speedFilterDepth;
+    return sum / (float)driver->filter.speedFilterDepth;
 }
 
 void MotorDriver_Init(MotorDriver* driver, const PID_Params* initialPid)
@@ -237,7 +240,9 @@ void MotorDriver_SetTargetRPM(MotorDriver* driver, const float rpm)
     // 转速限速保护(支持双向控制)
     const float targetRPM = fmaxf(fminf(rpm, driver->spec->maxRPM), driver->spec->maxRPM * -1.0f);
 
-    /* 更新PID控制器的设定值 */
+    // 重置积分
+    PID_Reset(driver->control.pidControl);
+    // 更新PID控制器的设定值
     driver->control.pidControl->setpoint = rpmToRadps(targetRPM);
 
     driver->control.targetRPM = targetRPM;

@@ -106,8 +106,8 @@ int MotorService_setOpenLoopDutyCycle(MotorService* service, MotorID motorId, fl
     MotorDriver_SetDutyCycle(driver, clampedDuty);
 
     // 更新状态
-    instance->state.velocity.rpm = 0; // 开环模式下转速未知
-    instance->state.velocity.mps = 0;
+    // instance->state.velocity.rpm = 0; // 开环模式下转速未知
+    // instance->state.velocity.mps = 0;
     instance->state.mode = MOTOR_DRIVER_MODE_OPEN_LOOP;
     instance->state.openLoopDuty = clampedDuty;
 
