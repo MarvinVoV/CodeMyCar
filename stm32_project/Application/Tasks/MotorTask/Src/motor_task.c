@@ -12,6 +12,9 @@
 #include "log_manager.h"
 #include "motor_service.h"
 
+#define CONTROL_FREQ_ACTIVE  200   // 活动时控制频率 (Hz)
+#define CONTROL_FREQ_IDLE    50    // 空闲时控制频率 (Hz)
+
 static osThreadId_t taskHandle = NULL;
 
 void MotorTask_init(MotorService* motorService)
@@ -35,28 +38,40 @@ void MotorTask_doTask(void* arg)
 
 
     uint32_t lastWake = osKernelGetTickCount();
-    uint32_t interval = osKernelGetTickFreq() / service->controlFreqHz;
+    uint32_t interval = osKernelGetTickFreq() / CONTROL_FREQ_IDLE;
 
     while (1)
     {
-        // 检查是否需要高频率运行
+        // 动态检测状态（增加滤波防止抖动）
+        static uint8_t activeCount = 0;
         bool isActive = false;
         for (int i = 0; i < MOTOR_MAX_NUM; i++)
         {
-            if (service->instances[i].state.velocity.rpm != 0)
+            // 5RPM死区
+            if (fabsf(service->instances[i].state.velocity.rpm) > 5.0f)
             {
                 isActive = true;
                 break;
             }
         }
-        // 动态调整间隔
+        // 滞回滤波（防频繁切换）
         if (isActive)
         {
-            interval = osKernelGetTickFreq() / 100; // 高频率：100 Hz
+            activeCount = (activeCount < 10) ? activeCount + 1 : 10;
         }
         else
         {
-            interval = osKernelGetTickFreq() / 10; // 低频率：10 Hz
+            activeCount = (activeCount > 0) ? activeCount - 1 : 0;
+        }
+
+        // 更新频率（滞回阈值）
+        if (activeCount >= 8)
+        {
+            interval = osKernelGetTickFreq() / CONTROL_FREQ_ACTIVE;
+        }
+        else if (activeCount <= 2)
+        {
+            interval = osKernelGetTickFreq() / CONTROL_FREQ_IDLE;
         }
 
         // 执行状态更新

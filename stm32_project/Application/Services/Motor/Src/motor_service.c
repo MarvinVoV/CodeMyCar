@@ -9,7 +9,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include "motor_service.h"
-
+#include "error_code.h"
 #include "log_manager.h"
 #include "motor_task.h"
 #include "pid_controller.h"
@@ -19,12 +19,12 @@
 
 static float calculateOdometer(float revolutions, float wheelRadiusMM);
 
-void MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriver* rightDriver)
+int MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriver* rightDriver)
 {
     if (!service || !leftDriver || !rightDriver)
     {
         LOG_ERROR(LOG_MODULE_MOTOR, "MotorService_init: invalid instance or hardware driver!");
-        return;
+        return ERR_MOTOR_SVR_INVALID_PARAM;
     }
 
     memset(service, 0, sizeof(MotorService));
@@ -34,7 +34,7 @@ void MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriv
     if (service->instances[MOTOR_LEFT_WHEEL].mutex == NULL)
     {
         LOG_ERROR(LOG_MODULE_MOTOR, "Failed to create left motor mutex!");
-        return;
+        return ERR_MOTOR_SVR_INIT_FAIL;
     }
 
     // 初始化右轮
@@ -43,7 +43,7 @@ void MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriv
     if (service->instances[MOTOR_RIGHT_WHEEL].mutex == NULL)
     {
         LOG_ERROR(LOG_MODULE_MOTOR, "Failed to create right motor mutex!");
-        return;
+        return ERR_MOTOR_SVR_INIT_FAIL;
     }
 
     // 初始化硬件驱动
@@ -52,6 +52,7 @@ void MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriv
 
     // 创建任务
     MotorTask_init(service);
+    return ERR_SUCCESS;
 }
 
 int MotorService_setTargetRPM(MotorService* service, MotorID motorId, float rpm)
@@ -156,7 +157,7 @@ void MotorService_updateState(MotorService* service)
         }
         // 驱动状态更新
         MotorDriver_Update(instance->driver);
-        const MotorDriverState driverState = MotorDriver_GetState(instance->driver);
+        const MotorDriverState driverState = MotorDriver_getState(instance->driver);
         // 更新速度
         instance->state.velocity.rpm = driverState.velocity.rpm;
         instance->state.velocity.mps = driverState.velocity.mps;

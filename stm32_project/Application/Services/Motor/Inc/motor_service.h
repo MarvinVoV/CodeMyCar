@@ -66,7 +66,6 @@ typedef struct
 typedef struct
 {
     MotorInstance instances[MOTOR_MAX_NUM]; // 电机实例数组
-    uint32_t controlFreqHz;                 // 控制频率（Hz）
 } MotorService;
 
 /**
@@ -77,7 +76,7 @@ typedef struct
  *
  * @note 该函数不会分配内存，需确保传入的结构体已正确初始化
  */
-void MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriver* rightDriver);
+int MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDriver* rightDriver);
 
 /**
  * @brief 设置电机实例转速（线程安全）

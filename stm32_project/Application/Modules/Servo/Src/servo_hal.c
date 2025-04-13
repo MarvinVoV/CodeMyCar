@@ -9,6 +9,10 @@
 #include "error_code.h"
 #include "log_manager.h"
 
+#ifndef CLAMP
+#define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
+#endif
+
 #define IS_TIM_APB1_INSTANCE(TIMx) \
 (((TIMx) == TIM2)  || ((TIMx) == TIM3)  || \
 ((TIMx) == TIM4)  || ((TIMx) == TIM5)  || \

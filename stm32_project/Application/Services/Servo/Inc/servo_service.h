@@ -77,12 +77,14 @@ typedef struct
 
 /**
  * @brief 初始化舵机控制服务实例
+ * @param steerInstance 舵机实例指针
  * @param config 舵机配置参数（机械参数、控制参数等），必须非空
  * @param driver 硬件驱动接口实现，必须非空
  * @return SteerInstance* 成功返回实例指针，失败返回NULL
  * @note 此函数会动态分配内存，使用后需调用 SteerService_Deinit 释放资源
  */
-SteerInstance* SteerService_init(SteerConfig* config, ServoDriver* driver);
+int SteerService_init(SteerInstance* steerInstance, SteerConfig* config, ServoDriver* driver);
+
 
 /**
  * @brief 平滑设置舵机角度（亚角度级精度）

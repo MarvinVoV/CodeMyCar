@@ -214,7 +214,7 @@ void MotorDriver_Update(MotorDriver* driver);
  * MotorState s = Motor_GetState(&motor);
  * printf("当前转速: %.2f RPM\n", s.rpm);
  */
-MotorDriverState MotorDriver_GetState(MotorDriver* driver);
+MotorDriverState MotorDriver_getState(MotorDriver* driver);
 
 /**
  * @brief 执行电机紧急停止操作

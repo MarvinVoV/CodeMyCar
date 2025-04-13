@@ -24,13 +24,13 @@ typedef enum
 /*---------------------- 高层运动控制定义 ----------------------*/
 typedef enum
 {
-    CMD_MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
-    CMD_MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
-    CMD_MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
-    CMD_MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
-    CMD_MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
-    CMD_MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
-} MotionMode;
+    MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
+    MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
+    MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
+    MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
+    MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
+    MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
+} MotionCtrlMode;
 
 // 差速控制参数（兼容混合模式）
 typedef struct
@@ -59,13 +59,13 @@ typedef struct
 {
     DiffCtrlParam base;       // 基础差速参数
     int16_t steerAngle;       // Q8.7 (deg)
-    uint8_t differentialGain; // 0-255映射0.0-1.0
+    uint8_t differentialGain; // 0-255(映射0.0-1.0)
 } MixedCtrlParam;
 
 // 运动控制主指令
 typedef struct
 {
-    MotionMode mode; // 运动模式
+    MotionCtrlMode mode; // 运动模式
     union
     {
         AckermannParam kinematicCtrl;

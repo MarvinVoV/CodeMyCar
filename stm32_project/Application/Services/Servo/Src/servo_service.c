@@ -16,59 +16,48 @@ static bool checkPositionReached(const SteerInstance* inst);
 static void handleCalibratingState(SteerInstance* inst);
 static int handleMovingState(SteerInstance* inst);
 
-SteerInstance* SteerService_init(SteerConfig* config, ServoDriver* driver)
+int SteerService_init(SteerInstance* steerInstance, SteerConfig* config, ServoDriver* driver)
 {
-    if (!config || !driver)
+    if (!steerInstance || !config || !driver)
     {
         LOG_ERROR(LOG_MODULE_SERVO, "Invalid config or driver");
-        return NULL;
+        return ERR_SRV_SERVO_INVALID_ARG;
     }
-
-    // 分配实例内存
-    SteerInstance* inst = (SteerInstance*)malloc(sizeof(SteerInstance));
-    if (!inst)
-    {
-        LOG_ERROR(LOG_MODULE_SERVO, "Failed to allocate memory for instance");
-        return NULL;
-    }
-
     // 初始化配置
-    memcpy(&inst->config, config, sizeof(SteerConfig));
-    inst->driver = driver;
+    memcpy(&steerInstance->config, config, sizeof(SteerConfig));
+    steerInstance->driver = driver;
 
     // 初始化运行时状态
-    inst->state.actualAngleDeg = 0.0f;
-    inst->state.targetAngleDeg = 0.0f;
-    inst->state.lastUpdateTick = 0;
-    inst->state.motionState = STEER_STATE_IDLE;
-    inst->state.errorCode = 0;
+    steerInstance->state.actualAngleDeg = 0.0f;
+    steerInstance->state.targetAngleDeg = 0.0f;
+    steerInstance->state.lastUpdateTick = 0;
+    steerInstance->state.motionState = STEER_STATE_IDLE;
+    steerInstance->state.errorCode = 0;
 
     // 初始化平滑控制
-    inst->smoothCtrl.startAngleDeg = 0.0f;
-    inst->smoothCtrl.remainingDeg = 0.0f;
-    inst->smoothCtrl.stepDeg = 0.0f;
+    steerInstance->smoothCtrl.startAngleDeg = 0.0f;
+    steerInstance->smoothCtrl.remainingDeg = 0.0f;
+    steerInstance->smoothCtrl.stepDeg = 0.0f;
 
-    inst->calibCtrl.calibPhase = 0;
-    inst->calibCtrl.calibStartAngle = 0.0f;
+    steerInstance->calibCtrl.calibPhase = 0;
+    steerInstance->calibCtrl.calibStartAngle = 0.0f;
 
     // 创建互斥锁
-    inst->mutex = osMutexNew(NULL);
-    if (!inst->mutex)
+    steerInstance->mutex = osMutexNew(NULL);
+    if (!steerInstance->mutex)
     {
-        free(inst);
-        return NULL;
+        return ERR_SRV_SERVO_INIT_FAIL;
     }
 
     // 调用驱动层初始化函数
-    if (ServoDriver_Init(inst->driver) != ERR_SUCCESS)
+    if (ServoDriver_Init(steerInstance->driver) != ERR_SUCCESS)
     {
-        free(inst);
-        return NULL;
+        return ERR_SRV_SERVO_INIT_FAIL;
     }
 
     // 创建任务
-    ServoTask_init(inst);
-    return inst;
+    ServoTask_init(steerInstance);
+    return ERR_SUCCESS;
 }
 
 int SteerService_setAngleSmoothly(SteerInstance* instance, float targetAngle, uint16_t speedMs)

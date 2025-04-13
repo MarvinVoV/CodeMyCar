@@ -25,7 +25,7 @@ void CmdProcessor_Init(CmdProcessorContext* commandContext)
     ctx = commandContext;
 }
 
-void CmdProcessor_processCommand(const ControlCmd* cmd)
+void CmdProcessor_processCommand(ControlCmd* cmd)
 {
     // 1. 安全校验
     if (!ctx) return;
@@ -33,14 +33,14 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
     // 2. 处理运动指令
     if (cmd->fields & CTRL_FIELD_MOTION)
     {
-        const MotionCmd* motion = &cmd->motion;
+        MotionCmd* motion = &cmd->motion;
         MotionContext* motionCtx = ctx->motionContext;
 
         int ret = ERR_SUCCESS;
         // 模式切换前检查
         if (motion->mode != MOTION_EMERGENCY_STOP)
         {
-            ret = MotionService_SetControlMode(motionCtx, (MotionCtrlMode)motion->mode);
+            ret = MotionService_SetControlMode(motionCtx, motion->mode);
             if (ret != ERR_SUCCESS)
             {
                 LOG_ERROR(LOG_MODULE_CMD, "Mode switch failed: 0x%02X", motion->mode);
@@ -51,11 +51,11 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
         // 模式分派处理
         switch (motion->mode)
         {
-            case CMD_MOTION_EMERGENCY_STOP:
+            case MOTION_EMERGENCY_STOP:
                 MotionService_EmergencyStop(motionCtx);
                 break;
 
-            case CMD_MOTION_DIFFERENTIAL:
+            case MOTION_DIFFERENTIAL:
                 {
                     const float linear = Q16_ToFloat(motion->params.diffCtrl.linearVel);
                     const float angular = Q16_ToFloat(motion->params.diffCtrl.angularVel);
@@ -63,7 +63,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
                     break;
                 }
 
-            case CMD_MOTION_STEER_ONLY:
+            case MOTION_STEER_ONLY:
                 {
                     const float linear = Q16_ToFloat(motion->params.kinematicCtrl.linearVel);
                     const float steer = Q8_7_ToFloat(motion->params.kinematicCtrl.steerAngle);
@@ -71,7 +71,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
                     break;
                 }
 
-            case CMD_MOTION_DIRECT_CONTROL:
+            case MOTION_DIRECT_CONTROL:
                 {
                     const float leftRpm = Q16_ToFloat(motion->params.directCtrl.leftRpm);
                     const float rightRpm = Q16_ToFloat(motion->params.directCtrl.rightRpm);
@@ -80,7 +80,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
                     break;
                 }
 
-            case CMD_MOTION_MIXED_STEER:
+            case MOTION_MIXED_STEER:
                 {
                     DiffCtrlParam* base = &motion->params.mixedCtrl.base;
                     float linear = Q16_ToFloat(base->linearVel);
@@ -91,7 +91,7 @@ void CmdProcessor_processCommand(const ControlCmd* cmd)
                     break;
                 }
 
-            case CMD_MOTION_SPIN_IN_PLACE:
+            case MOTION_SPIN_IN_PLACE:
                 {
                     DiffCtrlParam* p = &motion->params.diffCtrl;
                     const float angular = Q16_ToFloat(p->angularVel);

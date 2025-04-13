@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#include "cmsis_os2.h"
+#include "freertos_os2.h"
 #include "log_task.h"
 #include "queue_manager.h"
 

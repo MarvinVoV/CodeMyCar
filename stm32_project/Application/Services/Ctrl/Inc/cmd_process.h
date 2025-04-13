@@ -22,5 +22,5 @@ typedef struct
 
 void CmdProcessor_Init(CmdProcessorContext* commandContext);
 
-void CmdProcessor_processCommand(const ControlCmd* cmd);
+void CmdProcessor_processCommand(ControlCmd* cmd);
 #endif /* SERVICES_CTRL_INC_CMD_PROCESS_H_ */

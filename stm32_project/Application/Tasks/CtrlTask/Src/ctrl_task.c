@@ -77,7 +77,7 @@ static void dispatcher(uint8_t type, const uint8_t* cmd_payload, const uint16_t 
         return;
     }
 
-    const ControlCmd* cmd = (const ControlCmd*)cmd_payload;
+    ControlCmd* cmd = (ControlCmd*)cmd_payload;
 
     CmdProcessor_processCommand(cmd);
 }

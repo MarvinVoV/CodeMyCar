@@ -7,30 +7,30 @@
 
 #ifndef SERVICES_CTRL_INC_MOTION_SERVICE_H_
 #define SERVICES_CTRL_INC_MOTION_SERVICE_H_
-
+#include "ctrl_protocol.h"
 #include "motor_service.h"
 #include "servo_service.h"
 
 typedef struct
 {
-    uint16_t trackWidthMM;      // 轮距
-    uint16_t wheelbaseMM;       // 轴距（阿克曼模型）
-    uint16_t wheelRadiusMM;     // 车轮半径
-    uint16_t minTurnRadiusMM;   // 最小转弯半径（毫米） 阿克曼转弯约束
-    uint16_t maxSteerAngleDeg;  // 最大转向角度 deg
+    float trackWidthMM;         // 轮距
+    float wheelbaseMM;          // 轴距（阿克曼模型）
+    float wheelRadiusMM;        // 车轮半径
+    float minTurnRadiusMM;      // 最小转弯半径（毫米） 阿克曼转弯约束
+    float maxSteerAngleDeg;     // 最大转向角度 deg
     float maxAngularVelRad;     // 最大角速度rad/s
     float maxLinearVelocityMPS; // 最大线速度 m/s
 } ChassisConfig;
-
-typedef enum
-{
-    MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
-    MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
-    MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
-    MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
-    MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
-    MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
-} MotionCtrlMode;
+//
+// typedef enum
+// {
+//     MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
+//     MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
+//     MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
+//     MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
+//     MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
+//     MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
+// } MotionCtrlMode;
 
 typedef struct
 {
