@@ -11,10 +11,6 @@
 #include "ctrl_protocol.h"
 #include "motion_service.h"
 
-// Q格式转换宏
-#define Q15_TO_FLOAT(x) ((float)(x) / 32768.0f)
-#define Q7_TO_FLOAT(x)  ((float)(x) / 128.0f)
-
 typedef struct
 {
     MotionContext* motionContext;

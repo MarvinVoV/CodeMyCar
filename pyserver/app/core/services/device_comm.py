@@ -1,12 +1,12 @@
-from app.core.models.api_model import CommandResponse
-from app.core.models.command import DeviceCommand, PingCommand, ServoCommand
-from app.device.mqtt_client import MQTTClientWrapper
-from app.device.protocol.builder import DevicePayload, ProtocolFrameBuilder
-from app.device.protocol.common import ProtocolType
 from app.core.logger import get_logger
-from core.models.command import CommandType
+from app.core.models.api_model import CommandResponse
+from app.core.models.command import ControlReqCmd, MotionReqCmd, MotionReqMode
+from app.device.mqtt_client import MQTTClientWrapper
+from app.device.protocol.builder import DevicePayload, ProtocolFrameBuilder, MotionMode
+from app.device.protocol.common import ProtocolType
 
 logger = get_logger()
+
 
 class DeviceCommunicationService:
     def __init__(
@@ -18,45 +18,55 @@ class DeviceCommunicationService:
     async def process_command(
             self,
             device_id: str,
-            command: DeviceCommand,
+            command: ControlReqCmd,
     ) -> CommandResponse:
-        """处理指令下发全流程"""
-        # 1. 构建指令帧
-        frame = None
-        cmd_type = command.command_type
         try:
-            if cmd_type == CommandType.PING:
-                if isinstance(command.payload, PingCommand):
-                    ping_cmd = command.payload
-                    payload = DevicePayload().add_text(ping_cmd.message)
-                    frame = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value).set_payload(
-                        payload).build_frame()
-                    logger.info(" ".join(f"{byte:02X}" for byte in frame))
-            elif cmd_type == CommandType.SERVO:
-                if isinstance(command.payload, ServoCommand):
-                    servo_cmd = command.payload
-                    # todo
-                    payload = DevicePayload().add_servo(servo_cmd.angle, servo_cmd.speed)
-                    frame = ProtocolFrameBuilder(protocol_type=ProtocolType.CONTROL.value).set_payload(
-                        payload).build_frame()
-                    # logger.info(" ".join(f"{byte:02X}" for byte in frame))
+            # 处理运动控制指令
+            motion_cmd = command.motion
+            if not isinstance(motion_cmd, MotionReqCmd):
+                return CommandResponse(status=400, message="运动控制指令格式错误")
+            params = motion_cmd.params.root
+            duration = motion_cmd.duration
+            if motion_cmd.mode == MotionReqMode.DIFFERENTIAL:
+                payload = DevicePayload().add_motor_diff(
+                    params.linearVel, params.angularVel, duration
+                )
+            elif motion_cmd.mode == MotionReqMode.DIRECT_CONTROL:
+                payload = DevicePayload().add_motor_direct(
+                    params.leftRpm, params.rightRpm, params.steerAngle, duration
+                )
+            elif motion_cmd.mode == MotionReqMode.STEER_ONLY:
+                # 新增对STEER_ONLY模式的支持
+                payload = DevicePayload().add_steering_only(
+                    params.linearVel, params.steerAngle, duration
+                )
+            elif motion_cmd.mode == MotionReqMode.SPIN_IN_PLACE:
+                # 新增对SPIN_IN_PLACE模式的支持（假设仅需要持续时间）
+                payload = DevicePayload().add_spin_in_place(duration)
+            elif motion_cmd.mode == MotionReqMode.MIXED_STEER:
+                # 新增对MIXED_STEER模式的支持
+                payload = DevicePayload().add_mixed_steering(
+                    params.base.linearVel,
+                    params.base.angularVel,
+                    params.steerAngle,
+                    params.differentialGain,
+                    duration
+                )
             else:
                 return CommandResponse(
-                    status=500,
-                    message=f"指令类型 '{cmd_type}' 不支持"
+                    status=400,
+                    message=f"不支持的运动控制模式: {motion_cmd.mode.name}"
                 )
-
-            # 2. 指令下发
+            frame = ProtocolFrameBuilder(ProtocolType.CONTROL.value).set_payload(payload).build_frame()
             success = await self.mqtt.publish(
-                topic=f"cmd/esp32/{device_id}/exec", # cmd/device_type/device_id/exec
+                topic=f"cmd/esp32/{device_id}/exec",
                 payload=frame
             )
             logger.info(f"指令下发结果：{success}")
-
-            return CommandResponse(data={"command_type": cmd_type.value, "payload": command.payload})
+            return CommandResponse(data={"motion_cmd_mode": motion_cmd.mode.name, "payload_size": len(frame)})
         except Exception as e:
-            logger.error(f"指令下发失败，错误信息：{str(e)}")
+            logger.error(f"指令处理失败：{str(e)}")
             return CommandResponse(
                 status=500,
-                message=f"指令下发失败，请检查设备{device_id}是否在线，错误信息：{str(e)}"
+                message=f"设备{device_id}指令处理异常：{str(e)}"
             )

@@ -136,10 +136,8 @@ int main(void)
   MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
 
-
-    /*初始化UART空闲中断*/
-    Init_UART_DMA();
-
+  // 初始化UART空闲中断
+  Init_UART_DMA();
 
   /* USER CODE END 2 */
 
@@ -174,66 +172,32 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
     /* add threads, ... */
 
-    /*初始化日志模块*/
-    LogManager_Init();
-    // UART1 for local debug
-    static log_output_channel debug_channel = {
-        .huart = &huart1,
-        .level_filter = LOG_LEVEL_ALL,
-        .module_filter = LOG_MODULE_ALL,
-        .direct_output = true
-    };
-
-    static log_output_channel esp32_channel = {
-      .huart = &huart4,
+  // 初始化日志模块
+  LogManager_Init();
+  // UART1 for local debug
+  static log_output_channel debug_channel = {
+      .huart = &huart1,
       .level_filter = LOG_LEVEL_ALL,
       .module_filter = LOG_MODULE_ALL,
-      .direct_output = false
-    };
+      .direct_output = true
+  };
 
-    LogManager_AddOutputChannel(&esp32_channel);
-    LogManager_AddOutputChannel(&debug_channel);
+  static log_output_channel esp32_channel = {
+    .huart = &huart4,
+    .level_filter = LOG_LEVEL_ALL,
+    .module_filter = LOG_MODULE_ALL,
+    .direct_output = false
+  };
 
-    /*初始化控制任务*/
-    CtrlTask_Init();
-  // 系统初始化
-    if(System_Initialize() != 0) {
-      Error_Handler();
-    }
-    //
-    // // 舵机初始化
-    // const servo_hw_config servo_hw_config = {
-    //     .pwm_tim = &htim2,
-    //     .channel = TIM_CHANNEL_1,
-    //     .min_pulse = 500,
-    //     .max_pulse = 2500,
-    //     .min_angle = 0,
-    //     .max_angle = 180
-    // };
-    // servo_instance.hw = servo_hw_config;
-    // servo_service_init(&servo_instance);
-    //
-    // // 初始化motor 模块
-    // motor.encoder_res = 13; // 编码器线数13ppr
-    // motor.gear_ratio = 30; // 减速比30:1
-    // motor.pwm_tim = &htim3; // pwm 定时器
-    // motor.encoder_tim = &htim4; // 编码器定时器
-    // motor.hal= (HAL_MotorConfig){
-    //     .pwm_tim = &htim3,
-    //     .pwm_ch = TIM_CHANNEL_1, // TIM3的CH1（PA6)
-    //
-    //     .encode_tim = &htim4, // 编码器定时器句柄
-    //     .encode_ch_a = TIM_CHANNEL_1, // TIM4的CH1（PD12) 接编码器A相
-    //     .encode_ch_b = TIM_CHANNEL_2, // TIM4的CH2（PD13）接编码器B相
-    //
-    //     .in1_port = GPIOF,
-    //     .in1_pin = GPIO_PIN_7, //  IN1控制引脚GPIO端口 - 通常用于电机正转控制
-    //     .in2_port = GPIOF,
-    //     .in2_pin = GPIO_PIN_8  //  IN2控制引脚GPIO端口 - 通常用于电机反转控制
-    // };
-    // Motor_Init(&motor);
-    // Motor_SetSpeed(&motor, 50);
+  LogManager_AddOutputChannel(&esp32_channel);
+  LogManager_AddOutputChannel(&debug_channel);
 
+  // 初始化控制任务
+  CtrlTask_Init();
+  // 初始化系统设置
+  if(System_Initialize() != 0) {
+    Error_Handler();
+  }
 
   /* USER CODE END RTOS_THREADS */
 

@@ -10,9 +10,11 @@
 #include "log_manager.h"
 #include "ctrl_protocol.h"
 
-static inline float Q16_ToFloat(int32_t fixed);
-static inline float Q8_7_ToFloat(int16_t fixed);
-static inline float Gain8bit_ToFloat(uint8_t gain);
+
+static float decodeLinearVel(uint16_t value);
+static float decodeSteerAngle(uint16_t deg);
+static float decodeAngularVel(uint16_t angularVel);
+
 
 static CmdProcessorContext* ctx;
 
@@ -57,44 +59,44 @@ void CmdProcessor_processCommand(ControlCmd* cmd)
 
             case MOTION_DIFFERENTIAL:
                 {
-                    const float linear = Q16_ToFloat(motion->params.diffCtrl.linearVel);
-                    const float angular = Q16_ToFloat(motion->params.diffCtrl.angularVel);
+                    const float linear = decodeLinearVel(motion->params.diffCtrl.linearVel);
+                    const float angular = decodeAngularVel(motion->params.diffCtrl.angularVel);
                     ret = MotionService_SetVelocity(motionCtx, linear, angular);
                     break;
                 }
 
             case MOTION_STEER_ONLY:
                 {
-                    const float linear = Q16_ToFloat(motion->params.kinematicCtrl.linearVel);
-                    const float steer = Q8_7_ToFloat(motion->params.kinematicCtrl.steerAngle);
+                    const float linear = decodeLinearVel(motion->params.kinematicCtrl.linearVel);
+                    const float steer = decodeAngularVel(motion->params.kinematicCtrl.steerAngle);
                     ret = MotionService_SetAckermannParams(motionCtx, linear, steer);
                     break;
                 }
 
             case MOTION_DIRECT_CONTROL:
                 {
-                    const float leftRpm = Q16_ToFloat(motion->params.directCtrl.leftRpm);
-                    const float rightRpm = Q16_ToFloat(motion->params.directCtrl.rightRpm);
-                    const float steer = Q8_7_ToFloat(motion->params.directCtrl.steerAngle);
+                    const float leftRpm = motion->params.directCtrl.leftRpm;
+                    const float rightRpm = motion->params.directCtrl.rightRpm;
+                    const float steer = decodeSteerAngle(motion->params.directCtrl.steerAngle);
                     ret = MotionService_SetDirectControl(motionCtx, leftRpm, rightRpm, steer);
                     break;
                 }
 
             case MOTION_MIXED_STEER:
                 {
-                    DiffCtrlParam* base = &motion->params.mixedCtrl.base;
-                    float linear = Q16_ToFloat(base->linearVel);
-                    float angular = Q16_ToFloat(base->angularVel);
-                    float steer = Q8_7_ToFloat(motion->params.mixedCtrl.steerAngle);
-                    float gain = Gain8bit_ToFloat(motion->params.mixedCtrl.differentialGain);
+                    const DiffCtrlParam* base = &motion->params.mixedCtrl.base;
+                    const float linear = decodeLinearVel(base->linearVel);
+                    const float angular = decodeAngularVel(base->angularVel);
+                    const float steer = decodeSteerAngle(motion->params.mixedCtrl.steerAngle);
+                    const float gain = motion->params.mixedCtrl.differentialGain;
                     ret = MotionService_SetHybridParams(motionCtx, linear, angular, steer, gain);
                     break;
                 }
 
             case MOTION_SPIN_IN_PLACE:
                 {
-                    DiffCtrlParam* p = &motion->params.diffCtrl;
-                    const float angular = Q16_ToFloat(p->angularVel);
+                    const DiffCtrlParam* p = &motion->params.diffCtrl;
+                    const float angular = decodeAngularVel(p->angularVel);
                     ret = MotionService_SetSpinParams(motionCtx, angular);
                     break;
                 }
@@ -110,39 +112,19 @@ void CmdProcessor_processCommand(ControlCmd* cmd)
             LOG_ERROR(LOG_MODULE_CMD, "Command execute failed: 0x%04X", ret);
         }
     }
-    else if (cmd->fields & CTRL_FIELD_TEXT)
-    {
-        LOG_INFO(LOG_MODULE_SYSTEM, "Receive debug %.*s\n", cmd->pingText.len, cmd->pingText.msg);
-    }
 }
 
-// Q16.16定点数转换（带范围检查）
-static inline float Q16_ToFloat(int32_t fixed)
+static float decodeLinearVel(const uint16_t value)
 {
-    const float MAX_VALUE = 32767.99998f; // 0x7FFFFFFF / 65536.0
-    const float MIN_VALUE = -32768.0f;
-    return fmaxf(fminf((float)fixed / 65536.0f, MAX_VALUE), MIN_VALUE);
+    return (float)value * 0.001f; // 0.01 m/s分辨率
 }
 
-// Q8.7定点数转换（角度专用）
-static inline float Q8_7_ToFloat(int16_t fixed)
+static float decodeSteerAngle(const uint16_t deg)
 {
-    const float MAX_ANGLE = 90.0f; // 协议限制最大角度
-    const float raw = (float)fixed / 128.0f;
-    return fmaxf(fminf(raw, MAX_ANGLE), -MAX_ANGLE);
+    return (float)deg * 0.1f; // 0.1度分辨率
 }
 
-/**
- * @brief 将8位增益值转换为浮点数
- * @param gain 输入参数（0-255）
- * @return 映射到 0.0~1.0 的浮点值
- *
- * @note 边界处理：
- *   - gain=0   → 0.0
- *   - gain=255 → 1.0
- *   - 其他值按线性映射
- */
-static inline float Gain8bit_ToFloat(uint8_t gain)
+static float decodeAngularVel(const uint16_t angularVel)
 {
-    return (float)gain / 255.0f;
+    return (float)angularVel * 0.0644f; // 0.0644rad/s分辨率
 }

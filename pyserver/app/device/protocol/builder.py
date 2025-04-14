@@ -8,187 +8,155 @@ from app.device.protocol.common import PROTOCOL_MAX_DATA_LEN, FRAME_HEADER, FRAM
 
 # ---------- 基础类型定义 ----------
 class CtrlField(IntFlag):
-    MOTOR = 1 << 0  # 电机控制有效
-    SERVO = 1 << 1  # 舵机控制有效
-    TEXT = 1 << 7  # 调试信息有效
+    MOTION = 1 << 0  # 运动控制有效
 
 
-class MotorCtrlMode(IntEnum):
-    DIFFERENTIAL = 0x01  # 差速模式
-    DIRECT = 0x02  # 直接控制模式
-    EMERGENCY = 0x80  # 紧急模式
+class MotionMode(IntEnum):
+    EMERGENCY_STOP = 0x00
+    DIRECT_CONTROL = 0x01
+    DIFFERENTIAL = 0x02
+    STEER_ONLY = 0x03
+    SPIN_IN_PLACE = 0x04
+    MIXED_STEER = 0x05
 
 
-class MotorDiffCtrl(NamedTuple):
-    """ 差速模式参数"""
-    linear_vel: int  # 线速度（-3000~3000）
-    angular_vel: int  # 角速度（-1800~1800）
-    accel: int  # 加速度（0-100）
-
-    def to_bytes(self) -> bytes:
-        return struct.pack('<hhB',
-                           self.linear_vel,
-                           self.angular_vel,
-                           self.accel)
-
-    @classmethod
-    def from_bytes(cls, data: bytes):
-        return cls(*struct.unpack_from('<hhB', data))
-
-
-class MotorDirectCtrl(NamedTuple):
-    """直接控制模式参数"""
-    left_speed: int  # 左电机速度（-1000~1000）
-    right_speed: int  # 右电机速度（-1000~1000）
-    left_accel: int  # 左加速度（0-100%）
-    right_accel: int  # 右加速度（0-100%）
+class DiffCtrlParam(NamedTuple):
+    linearVel: int
+    angularVel: int
 
     def to_bytes(self) -> bytes:
-        return struct.pack('<hhBB',
-                           self.left_speed,
-                           self.right_speed,
-                           self.left_accel,
-                           self.right_accel)
-
-    @classmethod
-    def from_bytes(cls, data: bytes):
-        return cls(*struct.unpack_from('<hhBB', data))
+        return struct.pack('<hh', self.linearVel, self.angularVel).ljust(7, b'\x00')
 
 
-class ServoCtrl(NamedTuple):
-    """舵机控制参数"""
-    angle: int  # 角度（0~180）
-    speed: int  # 速度（0-100%）
+class DirectCtrlParam(NamedTuple):
+    leftRpm: int
+    rightRpm: int
+    steerAngle: int
 
     def to_bytes(self) -> bytes:
-        return struct.pack('<BB', self.angle, self.speed)
-
-    @classmethod
-    def from_bytes(cls, data: bytes):
-        return cls(*struct.unpack_from('<BB', data))
+        return struct.pack('<hhh', self.leftRpm, self.rightRpm, self.steerAngle).ljust(7, b'\x00')
 
 
-class TextData(NamedTuple):
-    message: str  # UTF-8字符串
+class AckermannParam(NamedTuple):
+    linearVel: int
+    steerAngle: int
 
     def to_bytes(self) -> bytes:
-        encoded = self.message.encode('utf-8')[:255]
-        return struct.pack('<B', len(encoded)) + encoded
-
-    @classmethod
-    def from_bytes(cls, data: bytes):
-        length = data[0]
-        return cls(data[1:1 + length].decode('utf-8', 'ignore'))
+        return struct.pack('<hh', self.linearVel, self.steerAngle).ljust(7, b'\x00')
 
 
-# ---------- 协议控制命令 ----------
+class MixedCtrlParam(NamedTuple):
+    base: DiffCtrlParam
+    steerAngle: int
+    differentialGain: int
+
+    def to_bytes(self) -> bytes:
+        return struct.pack('<hhhB', self.base.linearVel, self.base.angularVel, self.steerAngle, self.differentialGain)
+
+
+class MotionCmd:
+    def __init__(
+            self,
+            mode: MotionMode,
+            params: Union[DiffCtrlParam, DirectCtrlParam, AckermannParam, MixedCtrlParam],  # 添加类型注解
+            duration: int
+    ):
+        self.mode = mode
+        self.params = params
+        self.duration = duration
+
+    def to_bytes(self) -> bytes:
+        mode_byte = struct.pack('<B', self.mode.value)
+        params_bytes = self.params.to_bytes()
+        duration_bytes = struct.pack('<H', self.duration)
+        return mode_byte + params_bytes + duration_bytes
+
+
 class ControlCmd:
     def __init__(self):
         self.ctrl_id: int = 0
         self.ctrl_fields: CtrlField = CtrlField(0)
-        self.motor_mode: Optional[MotorCtrlMode] = MotorCtrlMode.DIRECT
-        self.motor_data: Optional[Union[MotorDiffCtrl, MotorDirectCtrl]] = MotorDirectCtrl(0, 0, 0, 0)
-        self.servo_data: Optional[ServoCtrl] = ServoCtrl(0, 0)
-        self.text_data: Optional[TextData] = TextData("")
+        self.motion: MotionCmd = MotionCmd(MotionMode.EMERGENCY_STOP, None, 0)
 
     def to_bytes(self) -> bytes:
-        # 基础字段打包
         header = struct.pack('<BB', self.ctrl_id, self.ctrl_fields)
-        payload = bytearray()
-
-        # 舵机控制数据
-        payload += (self.servo_data if self.servo_data else ServoCtrl(0, 0)).to_bytes()
-
-        # 电机数据
-        motor_mode = self.motor_mode if self.motor_mode is not None else 2
-        payload += struct.pack('<B', motor_mode)
-        if motor_mode == MotorCtrlMode.DIFFERENTIAL:
-            motor_data = self.motor_data if self.motor_data else MotorDiffCtrl(0, 0, 0)
-            payload += motor_data.to_bytes()
-        elif motor_mode == MotorCtrlMode.DIRECT:
-            motor_data = self.motor_data if self.motor_data else MotorDirectCtrl(0, 0, 0, 0)
-            payload += motor_data.to_bytes()
-        elif motor_mode == MotorCtrlMode.EMERGENCY:
-            pass  # 无数据
-        else:
-            # 模式0或未定义，填充6字节的0
-            payload += b'\x00\x00\x00\x00\x00\x00'
-
-        # 文本数据（无论是否启用，都包含）
-        payload += (self.text_data if self.text_data else TextData("")).to_bytes()
-
-        # 完整数据包
-        return header + payload
+        motion_bytes = self.motion.to_bytes()
+        return header + motion_bytes
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'ControlCmd':
         cmd = cls()
         pos = 0
-
-        # 解析基础头
+        # 解析控制头
         cmd.ctrl_id, cmd.ctrl_fields = struct.unpack_from('<BB', data, pos)
         pos += 2
-
-        # 先解析舵机数据
-        if cmd.ctrl_fields & CtrlField.SERVO:
-            cmd.servo_data = ServoCtrl.from_bytes(data[pos:pos + 2])
-            pos += 2
-
-        # 再解析电机数据
-        if cmd.ctrl_fields & CtrlField.MOTOR:
-            cmd.motor_mode = MotorCtrlMode(data[pos])
-            pos += 1
-            if cmd.motor_mode == MotorCtrlMode.DIFFERENTIAL:
-                cmd.motor_data = MotorDiffCtrl.from_bytes(data[pos:pos + 5])
-                pos += 5
-            elif cmd.motor_mode == MotorCtrlMode.DIRECT:
-                cmd.motor_data = MotorDirectCtrl.from_bytes(data[pos:pos + 6])
-                pos += 6
-
-        # 解析文本数据
-        if cmd.ctrl_fields & CtrlField.TEXT:
-            length = data[pos]
-            cmd.text_data = TextData.from_bytes(data[pos:pos + 1 + length])
-            pos += 1 + length
-
+        # 解析motion部分
+        mode_byte = data[pos]
+        pos += 1
+        params_data = data[pos:pos + 7]
+        pos += 7
+        duration = struct.unpack_from('<H', data, pos)[0]
+        pos += 2
+        # 根据mode解析params
+        mode = MotionMode(mode_byte)
+        if mode == MotionMode.EMERGENCY_STOP:
+            params = None
+        elif mode == MotionMode.DIRECT_CONTROL:
+            left, right, steer = struct.unpack('<hhh', params_data[:6])
+            params = DirectCtrlParam(left, right, steer)
+        elif mode == MotionMode.DIFFERENTIAL:
+            linear, angular = struct.unpack('<HH', params_data[:4])
+            params = DiffCtrlParam(linear, angular)
+        elif mode == MotionMode.STEER_ONLY:
+            linear, steer = struct.unpack('<Hh', params_data[:4])
+            params = AckermannParam(linear, steer)
+        elif mode == MotionMode.MIXED_STEER:
+            linear, angular, steer, gain = struct.unpack('<hhhB', params_data)
+            base = DiffCtrlParam(linearVel=linear, angularVel=angular)
+            params = MixedCtrlParam(base=base, steerAngle=steer, differentialGain=gain)
+        elif mode == MotionMode.SPIN_IN_PLACE:  # 新增处理分支
+            params = None
+        cmd.motion = MotionCmd(mode, params, duration)
         return cmd
 
 
-# ---------- 高层业务封装 ----------
 class DevicePayload:
     def __init__(self, ctrl_id: int = 0):
         self.cmd = ControlCmd()
         self.cmd.ctrl_id = ctrl_id
 
-    def add_motor_diff(self, linear: int, angular: int, accel: int) -> 'DevicePayload':
-        self.cmd.ctrl_fields |= CtrlField.MOTOR
-        self.cmd.motor_mode = MotorCtrlMode.DIFFERENTIAL
-        self.cmd.motor_data = MotorDiffCtrl(
-            linear_vel=linear,
-            angular_vel=angular,
-            accel=accel
-        )
+    def add_motor_diff(self, linear: int, angular: int, duration: int) -> 'DevicePayload':
+        params = DiffCtrlParam(linearVel=linear, angularVel=angular)
+        self.cmd.motion = MotionCmd(MotionMode.DIFFERENTIAL, params, duration)
+        self.cmd.ctrl_fields |= CtrlField.MOTION
         return self
 
-    def add_motor_direct(self, left: int, right: int, accel_l: int, accel_r: int) -> 'DevicePayload':
-        self.cmd.ctrl_fields |= CtrlField.MOTOR
-        self.cmd.motor_mode = MotorCtrlMode.DIRECT
-        self.cmd.motor_data = MotorDirectCtrl(
-            left_speed=left,
-            right_speed=right,
-            left_accel=accel_l,
-            right_accel=accel_r
-        )
+    def add_motor_direct(self, left: int, right: int, steer: int, duration: int) -> 'DevicePayload':
+        params = DirectCtrlParam(leftRpm=left, rightRpm=right, steerAngle=steer)
+        self.cmd.motion = MotionCmd(MotionMode.DIRECT_CONTROL, params, duration)
+        self.cmd.ctrl_fields |= CtrlField.MOTION
         return self
 
-    def add_servo(self, angle: int, speed: int) -> 'DevicePayload':
-        self.cmd.ctrl_fields |= CtrlField.SERVO
-        self.cmd.servo_data = ServoCtrl(angle, speed)
+    # 新增STEER_ONLY模式构造方法
+    def add_steering_only(self, linear: int, steer: int, duration: int) -> 'DevicePayload':
+        params = AckermannParam(linearVel=linear, steerAngle=steer)
+        self.cmd.motion = MotionCmd(MotionMode.STEER_ONLY, params, duration)
+        self.cmd.ctrl_fields |= CtrlField.MOTION
         return self
 
-    def add_text(self, message: str) -> 'DevicePayload':
-        self.cmd.ctrl_fields |= CtrlField.TEXT
-        self.cmd.text_data = TextData(message)
+    # 新增SPIN_IN_PLACE模式构造方法
+    def add_spin_in_place(self, duration: int) -> 'DevicePayload':
+        params = None  # 该模式可能不需要参数
+        self.cmd.motion = MotionCmd(MotionMode.SPIN_IN_PLACE, params, duration)
+        self.cmd.ctrl_fields |= CtrlField.MOTION
+        return self
+
+    # 新增MIXED_STEER模式构造方法
+    def add_mixed_steering(self, linear: int, angular: int, steer: int, gain: int, duration: int) -> 'DevicePayload':
+        base = DiffCtrlParam(linearVel=linear, angularVel=angular)
+        params = MixedCtrlParam(base=base, steerAngle=steer, differentialGain=gain)
+        self.cmd.motion = MotionCmd(MotionMode.MIXED_STEER, params, duration)
+        self.cmd.ctrl_fields |= CtrlField.MOTION
         return self
 
     @property

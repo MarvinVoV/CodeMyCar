@@ -16,8 +16,7 @@
 /*---------------------- 控制掩码定义 ----------------------*/
 typedef enum
 {
-    CTRL_FIELD_MOTION = (1 << 0), // 运动控制有效
-    CTRL_FIELD_TEXT = (1 << 7)    // 调试信息有效
+    CTRL_FIELD_MOTION = (1 << 0) // 运动控制
 } CtrlField;
 
 
@@ -30,43 +29,42 @@ typedef enum
     MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
     MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
     MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
-} MotionCtrlMode;
+} MotionMode;
 
 // 差速控制参数（兼容混合模式）
 typedef struct
 {
-    int32_t linearVel;  // Q16.16 (m/s)
-    int32_t angularVel; // Q16.16 (rad/s)
+    int16_t linearVel;  // 0.001 m/s步长 (-32.767~+32.767 m/s) 缩放因子 0.001 m/s
+    int16_t angularVel; // 缩放因子0.0644 rad/s (-8.24 ~ +8.18 rad/s)
 } DiffCtrlParam;
 
 // 直接控制参数
 typedef struct
 {
-    // todo 改为整数
-    int32_t leftRpm;    // Q16.16 (RPM)
-    int32_t rightRpm;   // Q16.16 (RPM)
-    int16_t steerAngle; // Q8.7 (deg)
+    int16_t leftRpm;    // 1 RPM步长
+    int16_t rightRpm;   // 1 RPM步长
+    int16_t steerAngle; // 0.1度步长
 } DirectCtrlParam;
 
 // 阿克曼转向参数
 typedef struct
 {
-    int32_t linearVel;  // Q16.16 (m/s)
-    int16_t steerAngle; // Q8.7 (deg)
+    int16_t linearVel;  // 0.01 m/s步长
+    int16_t steerAngle; // 0.1度步长
 } AckermannParam;
 
 // 混合控制参数
 typedef struct
 {
     DiffCtrlParam base;       // 基础差速参数
-    int16_t steerAngle;       // Q8.7 (deg)
-    uint8_t differentialGain; // 0-255(映射0.0-1.0)
+    int16_t steerAngle;       // 0.1度步长
+    uint8_t differentialGain; // 0-100% (步长0.392%)
 } MixedCtrlParam;
 
 // 运动控制主指令
 typedef struct
 {
-    MotionCtrlMode mode; // 运动模式
+    MotionMode mode; // 运动模式
     union
     {
         AckermannParam kinematicCtrl;
@@ -79,22 +77,12 @@ typedef struct
 } MotionCmd;
 
 
-/*---------------------- 独立设备控制指令 ----------------------*/
-
-typedef struct
-{
-    uint8_t len;   // 文本长度
-    uint8_t msg[]; // 柔性数组（C99特性）
-} PingText;
-
-
 /*---------------------- 主控制指令 ----------------------*/
 typedef struct
 {
-    uint8_t ctrlId;    // 控制器ID
-    uint8_t fields;    // 控制字段（位掩码组合）
-    MotionCmd motion;  // 运动控制参数
-    PingText pingText; // 调试信息 debug
+    uint8_t ctrlId;   // 控制器ID
+    uint8_t fields;   // 控制字段（位掩码组合）
+    MotionCmd motion; // 运动控制参数
 } ControlCmd;
 #pragma pack(pop)
 

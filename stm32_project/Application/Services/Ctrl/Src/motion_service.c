@@ -20,7 +20,7 @@ static void handleMixedSteering(MotionContext* ctx, const MotionTarget* target);
 static void updateRuntimeState(MotionContext* ctx);
 
 
-static float mmToMeters(uint16_t mm);
+static float mmToMeters(float mm);
 static float radiansToDegrees(float rad);
 static float sign(float val);
 static float clamp(float value, float min, float max);
@@ -109,7 +109,7 @@ int MotionContext_Init(MotionContext* ctx, MotorService* motor, SteerInstance* s
     return 0;
 }
 
-int MotionService_SetControlMode(MotionContext* ctx, MotionCtrlMode newMode)
+int MotionService_SetControlMode(MotionContext* ctx, MotionMode newMode)
 {
     if (!ctx || newMode >= MOTION_MODE_MAX)
     {
@@ -119,7 +119,7 @@ int MotionService_SetControlMode(MotionContext* ctx, MotionCtrlMode newMode)
 
     LOCK(ctx);
 
-    const MotionCtrlMode currentMode = ctx->motionTarget.mode;
+    const MotionMode currentMode = ctx->motionTarget.mode;
 
     // 检查模式转换合法性
     if (!modeTransitionTable[currentMode][newMode])
@@ -166,9 +166,9 @@ int MotionService_SetControlMode(MotionContext* ctx, MotionCtrlMode newMode)
 /**
  * @brief 获取当前运动控制模式（线程安全）
  * @param ctx 运动控制上下文指针
- * @return MotionCtrlMode 当前控制模式
+ * @return MotionMode 当前控制模式
  */
-MotionCtrlMode MotionService_GetCurrentMode(const MotionContext* ctx)
+MotionMode MotionService_GetCurrentMode(const MotionContext* ctx)
 {
     if (!ctx)
     {
@@ -177,7 +177,7 @@ MotionCtrlMode MotionService_GetCurrentMode(const MotionContext* ctx)
 
     // 加锁读取（即使基本类型也保证原子性）
     // LOCK(ctx);
-    const MotionCtrlMode currentMode = ctx->motionTarget.mode;
+    const MotionMode currentMode = ctx->motionTarget.mode;
     // UNLOCK(ctx);
 
     return currentMode;
@@ -229,7 +229,7 @@ int MotionService_SetVelocity(MotionContext* ctx, float linear, float angular)
     return ERR_SUCCESS;
 }
 
-int MotionService_SetDirectControl(MotionContext* ctx, float leftRpm, float rightRpm, int steerAngle)
+int MotionService_SetDirectControl(MotionContext* ctx, float leftRpm, float rightRpm, float steerAngle)
 {
     if (!ctx || !isfinite(leftRpm) || !isfinite(rightRpm))
     {
@@ -298,7 +298,7 @@ int MotionService_SetAckermannParams(MotionContext* ctx, float linearVel, float 
     }
 
     // 记录参数调整事件
-    if (fabs(clampedVel - linearVel) > 0.001f || fabs(clampedAngle - steerAngle) > 0.1f)
+    if (fabsf(clampedVel - linearVel) > 0.001f || fabsf(clampedAngle - steerAngle) > 0.1f)
     {
         ctx->state.lastError = MOTION_ERR_PARAM_CLAMPED;
     }
@@ -332,10 +332,10 @@ int MotionService_SetHybridParams(MotionContext* ctx, float linear, float angula
     uint8_t clampFlag = 0;
 
     // 参数钳位处理
-    float clampedLinear = CLAMP(linear, -cfg->maxLinearVelocityMPS, cfg->maxLinearVelocityMPS);
-    float clampedAngular = CLAMP(angular, -cfg->maxAngularVelRad, cfg->maxAngularVelRad);
-    float clampedSteer = CLAMP(steerAngle, -cfg->maxSteerAngleDeg, cfg->maxSteerAngleDeg);
-    float clampedBlend = CLAMP(steeringBlend, 0.0f, 1.0f);
+    const float clampedLinear = CLAMP(linear, -cfg->maxLinearVelocityMPS, cfg->maxLinearVelocityMPS);
+    const float clampedAngular = CLAMP(angular, -cfg->maxAngularVelRad, cfg->maxAngularVelRad);
+    const float clampedSteer = CLAMP(steerAngle, -cfg->maxSteerAngleDeg, cfg->maxSteerAngleDeg);
+    const float clampedBlend = CLAMP(steeringBlend, 0.0f, 1.0f);
 
     // 记录参数调整事件
     if (clampedLinear != linear) clampFlag |= 0x01;
@@ -387,7 +387,7 @@ int MotionService_SetSteerAngle(MotionContext* ctx, float angleDeg)
     LOCK(ctx);
 
     // 检查模式兼容性
-    const MotionCtrlMode mode = ctx->motionTarget.mode;
+    const MotionMode mode = ctx->motionTarget.mode;
     if (mode != MOTION_STEER_ONLY && mode != MOTION_MIXED_STEER)
     {
         ctx->state.lastError = MOTION_ERR_MODE_MISMATCH;
@@ -397,7 +397,7 @@ int MotionService_SetSteerAngle(MotionContext* ctx, float angleDeg)
 
     // 获取配置参数
     const float maxAngle = ctx->chassisConfig.maxSteerAngleDeg;
-    float clampedAngle = CLAMP(angleDeg, -maxAngle, maxAngle);
+    const float clampedAngle = CLAMP(angleDeg, -maxAngle, maxAngle);
 
     // 记录参数调整事件
     if (fabsf(clampedAngle - angleDeg) > 0.1f)
@@ -442,7 +442,7 @@ int MotionService_SetSpinParams(MotionContext* ctx, float angularVel)
     // 获取配置参数
     const ChassisConfig* cfg = &ctx->chassisConfig;
     const float maxAngular = cfg->maxAngularVelRad;
-    float clampedAngular = CLAMP(angularVel, -maxAngular, maxAngular);
+    const float clampedAngular = CLAMP(angularVel, -maxAngular, maxAngular);
 
     // 记录参数调整事件
     if (clampedAngular != angularVel)
@@ -510,8 +510,8 @@ int MotionService_ClearFaults(MotionContext* ctx)
     }
 
     // 检查所有故障是否已恢复
-    bool isFaultClear = (ctx->motorService->instances[MOTOR_LEFT_WHEEL].state.errorCode == 0 && ctx->motorService->
-        instances[MOTOR_RIGHT_WHEEL].state.errorCode == 0);
+    const bool isFaultClear = (ctx->motorService->instances[MOTOR_LEFT_WHEEL].state.errorCode == 0 &&
+        ctx->motorService-> instances[MOTOR_RIGHT_WHEEL].state.errorCode == 0);
 
     if (isFaultClear)
     {
@@ -703,7 +703,7 @@ static void handleMixedSteering(MotionContext* ctx, const MotionTarget* target)
     ctx->state.drive.rightRpm = rightRpm;
 
     // 转向系统状态
-    ctx->state.steering.targetAngle = (int)finalSteer;
+    ctx->state.steering.targetAngle = finalSteer;
 
     // 运动学状态
     ctx->state.velocity.linear = linearVel;
@@ -760,7 +760,7 @@ static void updateRuntimeState(MotionContext* ctx)
 
     /*========== 定位状态更新 ==========*/
     // 计算轮周长
-    const float wheelCircumference = 2 * M_PI * wheelRadiusM;
+    const float wheelCircumference = 2.0f * M_PI * wheelRadiusM;
 
     // 计算本次采样周期内的转数变化量
     static float lastLeftRevs = 0, lastRightRevs = 0; // 需持久化
@@ -804,7 +804,7 @@ static void updateRuntimeState(MotionContext* ctx)
 
 
 // 毫米 → 米
-static float mmToMeters(const uint16_t mm)
+static float mmToMeters(const float mm)
 {
     return (float)((double)mm / 1000.0); // 双精度中间计算
 }

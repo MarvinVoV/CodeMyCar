@@ -34,7 +34,7 @@ typedef struct
 
 typedef struct
 {
-    MotionCtrlMode mode;
+    MotionMode mode;
 
     union
     {
@@ -65,7 +65,7 @@ typedef struct
         {
             float leftRpm;  // 左轮目标转速
             float rightRpm; // 右轮目标转速
-            int steerAngle; // 前轮转向角 (deg)
+            float steerAngle; // 前轮转向角 (deg)
         } directCtrl;
 
         // 混合模式扩展参数
@@ -83,7 +83,7 @@ typedef struct
 typedef struct
 {
     // --- 基础状态 ---
-    MotionCtrlMode currentMode; // 当前控制模式
+    MotionMode currentMode; // 当前控制模式
     uint32_t timestamp;         // 状态更新时间戳 (ms)
 
     // --- 执行器状态 ---
@@ -153,14 +153,14 @@ int MotionContext_Init(MotionContext* ctx, MotorService* motor, SteerInstance* s
  * @return int 0成功，错误码见备注
  * @note 错误码：-1=无效模式，-2=模式切换被拒绝（如急停未解除）
  */
-int MotionService_SetControlMode(MotionContext* ctx, MotionCtrlMode mode);
+int MotionService_SetControlMode(MotionContext* ctx, MotionMode mode);
 
 /**
  * @brief 获取当前运动控制模式（线程安全）
  * @param ctx 运动控制上下文指针
- * @return MotionCtrlMode 当前控制模式
+ * @return MotionMode 当前控制模式
  */
-MotionCtrlMode MotionService_GetCurrentMode(const MotionContext* ctx);
+MotionMode MotionService_GetCurrentMode(const MotionContext* ctx);
 
 
 //=============================== 运动模式 ================================
@@ -189,7 +189,7 @@ int MotionService_SetVelocity(MotionContext* ctx, float linear, float angular);
  *         MOTION_ERR_MODE_MISMATCH - 当前非直接控制模式
  * @warning 直接绕过运动学模型，需谨慎使用
  */
-int MotionService_SetDirectControl(MotionContext* ctx, float leftRpm, float rightRpm, int steerAngle);
+int MotionService_SetDirectControl(MotionContext* ctx, float leftRpm, float rightRpm, float steerAngle);
 
 /**
  * @brief 设置混合转向控制参数（线程安全）

@@ -6,7 +6,7 @@ from app.config.dependencies import get_comm_service
 from app.core.logger import get_logger
 from app.core.models.api_model import CommandResponse
 from app.core.models.api_model import ErrorResponse
-from app.core.models.command import StatusResponse, DeviceCommand
+from app.core.models.command import StatusResponse, ControlCmd
 from app.core.services.device_comm import DeviceCommunicationService
 from app.core.exception.errorcode import ErrorCode
 from app.core.exception.exceptions import AppException
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/v1/devices", tags=["Devices"])
              })
 async def send_device_command(
         device_id: str,
-        command: DeviceCommand = Body(...),
+        command: ControlCmd = Body(...),
         comm_service: DeviceCommunicationService = Depends(get_comm_service)
 ):
     """
@@ -38,7 +38,7 @@ async def send_device_command(
     logger.info(
         "Processing device command",
         device_id=device_id,
-        command_type=command.command_type.value
+        cmd_fields = command.fields
     )
     try:
         # 调用服务层处理核心逻辑
