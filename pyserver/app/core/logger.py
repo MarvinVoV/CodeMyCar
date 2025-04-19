@@ -111,7 +111,7 @@ def add_custom_timestamp(logger, method_name, event_dict):
 def _get_console_renderer() -> structlog.dev.ConsoleRenderer:
     """控制台渲染器（无颜色依赖）。"""
     return structlog.dev.ConsoleRenderer(
-        pad_event=30,
+        pad_event=0, # 移除填充
         colors=True,
         exception_formatter=structlog.dev.plain_traceback
     )

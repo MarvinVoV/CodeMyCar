@@ -49,7 +49,7 @@ typedef struct
 // 阿克曼转向参数
 typedef struct
 {
-    int16_t linearVel;  // 0.01 m/s步长
+    int16_t linearVel;  // 0.001 m/s步长 (-32.767~+32.767 m/s) 缩放因子 0.001 m/s
     int16_t steerAngle; // 0.1度步长
 } AckermannParam;
 

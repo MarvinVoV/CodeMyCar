@@ -2,13 +2,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.web.middleware.middleware import register_middlewares
 from app.config import get_settings
 from core.exception.exceptions import register_exceptions
 from app.core.logger import setup_logging
-from app.device.mqtt_client import MQTTClientWrapper
-from app.device.subscription_manager import init_subscriptions
-from app.web.api.v1 import devices, system
+from mqtt.mqtt_client import MQTTClientWrapper
+from mqtt.subscription import init_subscriptions
+from web.middlewares import register_middlewares
+from web.routes import devices, status
 
 
 @asynccontextmanager
@@ -59,7 +59,7 @@ register_exceptions(app)
 
 # 挂载路由
 app.include_router(devices.router)
-app.include_router(system.router)
+app.include_router(status.router)
 
 # 注册中间件
 register_middlewares(app)

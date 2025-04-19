@@ -3,11 +3,11 @@ from typing import Dict, Callable, Union
 from paho.mqtt.client import topic_matches_sub
 
 from app.core.logger import get_logger
-from app.device.handlers.status_handler import  handle_device_heartbeat
-from app.device.mqtt_client import MQTTClientWrapper
-from app.device.topic import Topic
-from app.device.handlers.sensor_handler import handle_device_sensor_data
-from app.device.handlers.log_handler import handle_device_log
+from mqtt.handlers.status_handler import  handle_device_status
+from mqtt.mqtt_client import MQTTClientWrapper
+from mqtt.topic import Topic
+from mqtt.handlers.sensor_handler import handle_device_sensor_data
+from mqtt.handlers.log_handler import handle_device_log
 
 logger = get_logger()
 
@@ -106,7 +106,7 @@ def init_subscriptions(app):
     # 注册处理函数
     # 设备数据上报 data/[device_type]/[device_id]/sensor
     mgr.register(Topic.TOPIC_SUB_SENSOR, handle_device_sensor_data)
-    mgr.register(Topic.TOPIC_SUB_HEARTBEAT, handle_device_heartbeat)
+    mgr.register(Topic.TOPIC_SUB_HEARTBEAT, handle_device_status)
     mgr.register(Topic.TOPIC_SUB_LOG, handle_device_log)
 
     app.state.subscription_mgr = mgr

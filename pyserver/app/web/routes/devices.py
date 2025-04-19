@@ -2,31 +2,28 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Body
 
-from app.config.dependencies import get_comm_service
-from app.core.logger import get_logger
-from app.core.models.api_model import CommandResponse
-from app.core.models.api_model import ErrorResponse
-from app.core.models.command import StatusResponse, ControlCmd
-from app.core.services.device_comm import DeviceCommunicationService
 from app.core.exception.errorcode import ErrorCode
 from app.core.exception.exceptions import AppException
+from app.core.logger import get_logger
+from services.device_service import DeviceService
+from web.dependencies import get_device_service
+from web.schemas import CommonResponse, ControlCommand, StatusResponse
 
 logger = get_logger()
 
 router = APIRouter(prefix="/api/v1/devices", tags=["Devices"])
 
-
 @router.post("/{device_id}/commands",
-             response_model=CommandResponse,
+             response_model=CommonResponse,
              responses={
-                 400: {"model": ErrorResponse},
-                 404: {"model": ErrorResponse},
-                 500: {"model": ErrorResponse}
+                 400: {"model": CommonResponse},
+                 404: {"model": CommonResponse},
+                 500: {"model": CommonResponse}
              })
 async def send_device_command(
         device_id: str,
-        command: ControlCmd = Body(...),
-        comm_service: DeviceCommunicationService = Depends(get_comm_service)
+        command: ControlCommand = Body(...),
+        device_service: DeviceService = Depends(get_device_service)
 ):
     """
     设备指令下发接口
@@ -38,11 +35,11 @@ async def send_device_command(
     logger.info(
         "Processing device command",
         device_id=device_id,
-        cmd_fields = command.fields
+        mode=command.motion.mode
     )
     try:
         # 调用服务层处理核心逻辑
-        result = await comm_service.process_command(
+        result = await device_service.process_command(
             device_id=device_id,
             command=command,
         )

@@ -1,15 +1,13 @@
 from typing import Union
 
-from paho.mqtt.client import topic_matches_sub
-
-from app.core.logger import get_logger
 from app.core.logger import get_esp32_logger, get_stm32_logger
-from app.device.protocol.builder import LogParser
+from app.core.logger import get_logger
+from device.protocol.frame_parser import LogDataParser
 
 logger = get_logger(__name__)
 logger_esp32 = get_esp32_logger()
 logger_stm32 = get_stm32_logger()
-logParser = LogParser()
+logParser = LogDataParser()
 
 
 async def handle_device_log(topic: str, payload: Union[bytes, dict, str]):

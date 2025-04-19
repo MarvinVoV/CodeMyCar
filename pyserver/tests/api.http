@@ -12,21 +12,14 @@ Accept: application/json
 Content-Type: application/json
 
 {
-  "command_type": "servo",
-  "payload": {
-    "angle": 110,
-    "speed": 50
-  }
-}
-
-### POST /api/v1/devices/DEV1/commands
-POST http://localhost:8000/api/v1/devices/DEV1/commands
-Accept: application/json
-Content-Type: application/json
-
-{
-  "command_type": "ping",
-  "payload": {
-    "message": "hello world"
+  "ctrl_id": "1",
+  "motion": {
+    "mode": 1,
+    "params": {
+      "left_rpm": 5,
+      "right_rpm": 5,
+      "steer_angle": 30
+    },
+    "duration": 10
   }
 }

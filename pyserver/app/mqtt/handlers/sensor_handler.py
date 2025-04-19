@@ -1,4 +1,3 @@
-# app/device/handlers/sensor_handler.py
 from app.core.logger import get_logger
 
 logger = get_logger("handler.sensor")
