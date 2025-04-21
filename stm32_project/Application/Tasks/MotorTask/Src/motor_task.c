@@ -36,7 +36,6 @@ void MotorTask_doTask(void* arg)
 {
     MotorService* service = (MotorService*)arg;
 
-
     uint32_t lastWake = osKernelGetTickCount();
     uint32_t interval = osKernelGetTickFreq() / CONTROL_FREQ_IDLE;
 

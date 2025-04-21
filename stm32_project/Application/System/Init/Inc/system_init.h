@@ -23,10 +23,10 @@ extern TIM_HandleTypeDef htim5;
 /*--------------------- 系统上下文 ---------------------*/
 typedef struct
 {
-    MotorService motorService;
-    SteerInstance steerInstance;
-    MotionContext motionContext;
-    CmdProcessorContext cmdContext;
+    MotorService* motorService;
+    SteerInstance* steerInstance;
+    MotionContext* motionContext;
+    CmdProcessorContext* cmdContext;
 } SystemContext;
 
 /**

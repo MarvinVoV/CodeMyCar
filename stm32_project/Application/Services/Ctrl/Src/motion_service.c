@@ -66,7 +66,7 @@ int MotionContext_Init(MotionContext* ctx, MotorService* motor, SteerInstance* s
     memcpy(&ctx->chassisConfig, config, sizeof(ChassisConfig));
 
     // 初始化目标参数
-    ctx->motionTarget.mode = MOTION_EMERGENCY_STOP;
+    ctx->motionTarget.mode = MOTION_DIRECT_CONTROL;
     memset(&ctx->motionTarget.params, 0, sizeof(ctx->motionTarget.params));
 
     // 初始化状态

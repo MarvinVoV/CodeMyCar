@@ -8,8 +8,23 @@
 
 #include "error_code.h"
 
-
 static SystemContext sysCtx;
+
+static MotorSpec motorSpec;
+static HAL_MotorConfig motorLeftHalConfig;
+static HAL_MotorConfig motorRightHalConfig;
+static PID_Controller motorPicController;
+static MotorDriver motorLeftDriver;
+static MotorDriver motorRightDriver;
+static MotorService motorService;
+
+static HAL_ServoConfig servoHalConfig;
+static ServoDriver servoDriver;
+static SteerConfig steerConfig;
+static SteerInstance steerInstance;
+
+static MotionContext motionContext;
+static CmdProcessorContext commandContext;
 
 /**
  * @brief 底盘默认物理参数配置
@@ -27,7 +42,7 @@ static const ChassisConfig DEFAULT_CHASSIS_CFG = {
 
 int System_Initialize()
 {
-    HAL_MotorConfig motorLeftHalConfig = {
+    motorLeftHalConfig = (HAL_MotorConfig){
         .pwm = {
             .tim = &htim3,
             .ch = TIM_CHANNEL_1
@@ -42,7 +57,8 @@ int System_Initialize()
             .in2Pin = GPIO_PIN_8 //  IN2控制引脚GPIO端口 - 通常用于电机反转控制
         }
     };
-    HAL_MotorConfig motorRightHalConfig = {
+
+    motorRightHalConfig = (HAL_MotorConfig){
         .pwm = {
             .tim = &htim3,
             .ch = TIM_CHANNEL_2
@@ -58,14 +74,14 @@ int System_Initialize()
         }
     };
 
-    MotorSpec motorSpec = {
+    motorSpec = (MotorSpec){
         .encoderPPR = 13,
         .gearRatio = 30,
         .maxRPM = 400,
         .wheelRadiusMM = DEFAULT_CHASSIS_CFG.wheelbaseMM
     };
 
-    PID_Controller motorPicController = {
+    motorPicController = (PID_Controller){
         .params = {
             .kp = 1.0f,
             .ki = 0.1f,
@@ -75,7 +91,7 @@ int System_Initialize()
         }
     };
 
-    MotorDriver motorLeftDriver = {
+    motorLeftDriver = (MotorDriver){
         .hal_cfg = &motorLeftHalConfig,
         .spec = &motorSpec,
         .control = {
@@ -84,7 +100,8 @@ int System_Initialize()
             .targetRPM = 0.0f,
         }
     };
-    MotorDriver motorRightDriver = {
+
+    motorRightDriver = (MotorDriver){
         .hal_cfg = &motorRightHalConfig,
         .spec = &motorSpec,
         .control = {
@@ -94,7 +111,7 @@ int System_Initialize()
         }
     };
 
-    MotorService motorService = {
+    motorService = (MotorService){
         .instances = {
             [MOTOR_LEFT_WHEEL] = {
                 .driver = &motorLeftDriver
@@ -104,20 +121,21 @@ int System_Initialize()
             }
         }
     };
+
     // 初始化电机服务
     if (MotorService_init(&motorService, &motorLeftDriver, &motorRightDriver) != ERR_SUCCESS)
     {
         return ERR_HW_INIT_FAIL;
     }
 
-
-    HAL_ServoConfig servoHalConfig = {
+    servoHalConfig = (HAL_ServoConfig){
         .pwmTim = &htim2,
         .channel = TIM_CHANNEL_1,
         .maxPulse = SERVO_MAX_PULSE,
         .minPulse = SERVO_MIN_PULSE
     };
-    ServoDriver servoDriver = {
+
+    servoDriver = (ServoDriver){
         .hw = &servoHalConfig,
         .spec = {
             .minAngle = SERVO_ANGLE_MIN,
@@ -128,15 +146,17 @@ int System_Initialize()
         }
     };
 
-    SteerConfig steerConfig = {
+    steerConfig = (SteerConfig){
         .minAngleDeg = -45,
         .maxAngleDeg = 45,
         .deadZoneDeg = 2,
         .updateIntervalMs = 20
     };
-    SteerInstance steerInstance = {
+
+    steerInstance = (SteerInstance){
         .driver = &servoDriver
     };
+
     // 初始化转向服务
     if (SteerService_init(&steerInstance, &steerConfig, &servoDriver) != ERR_SUCCESS)
     {
@@ -145,28 +165,27 @@ int System_Initialize()
 
 
     // 初始化运动控制
-    ChassisConfig chassisConfig = DEFAULT_CHASSIS_CFG;
-    MotionContext motionContext = {
-        .chassisConfig = chassisConfig,
+    motionContext = (MotionContext){
+        .chassisConfig = DEFAULT_CHASSIS_CFG,
         .motorService = &motorService,
         .steerServo = &steerInstance
     };
-    if (MotionContext_Init(&motionContext, &motorService, &steerInstance, &chassisConfig) != ERR_SUCCESS)
+    if (MotionContext_Init(&motionContext, &motorService, &steerInstance, &DEFAULT_CHASSIS_CFG) != ERR_SUCCESS)
     {
         return ERR_HW_INIT_FAIL;
     }
 
     // 初始化命令处理器
-    CmdProcessorContext cmdContext = {
+    commandContext = (CmdProcessorContext){
         .motionContext = &motionContext
     };
-    CmdProcessor_Init(&cmdContext);
+    CmdProcessor_Init(&commandContext);
 
 
-    sysCtx.motionContext = motionContext;
-    sysCtx.motorService = motorService;
-    sysCtx.cmdContext = cmdContext;
-    sysCtx.steerInstance = steerInstance;
+    sysCtx.motionContext = &motionContext;
+    sysCtx.motorService = &motorService;
+    sysCtx.cmdContext = &commandContext;
+    sysCtx.steerInstance = &steerInstance;
 
     return ERR_SUCCESS;
 }
