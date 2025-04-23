@@ -44,6 +44,8 @@ int ServoHAL_init(HAL_ServoConfig* config)
         config->safetyPulse = (config->minPulse + config->maxPulse) / 2;
     }
 
+    __HAL_TIM_SET_COMPARE(config->pwmTim, config->channel, config->safetyPulse);
+
     // 启动PWM并验证
     if (HAL_TIM_PWM_Start(config->pwmTim, config->channel) != HAL_OK)
     {

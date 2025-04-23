@@ -11,14 +11,22 @@
 #include "ctrl_protocol.h"
 #include "log_manager.h"
 #include "motor_service.h"
+#include "freertos_os2.h"
+#include "task.h"
 
-#define CONTROL_FREQ_ACTIVE  200   // 活动时控制频率 (Hz)
-#define CONTROL_FREQ_IDLE    50    // 空闲时控制频率 (Hz)
+#define CONTROL_FREQ_ACTIVE  (200)   // 活动时控制频率 (Hz)
+#define CONTROL_FREQ_IDLE    (50)    // 空闲时控制频率 (Hz)
+#define DEFAULT_HYSTERESIS_THRESH   (8)
 
 static osThreadId_t taskHandle = NULL;
 
 void MotorTask_init(MotorService* motorService)
 {
+    if (motorService == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "MotorService is NULL");
+        return;
+    }
     const osThreadAttr_t taskAttributes = {
         .name = "MotorTask",
         .stack_size = 512 * 4,
@@ -35,10 +43,11 @@ void MotorTask_init(MotorService* motorService)
 void MotorTask_doTask(void* arg)
 {
     MotorService* service = (MotorService*)arg;
-
-    uint32_t lastWake = osKernelGetTickCount();
-    uint32_t interval = osKernelGetTickFreq() / CONTROL_FREQ_IDLE;
-
+    const TickType_t xActiveInterval = pdMS_TO_TICKS(1000 / CONTROL_FREQ_ACTIVE);
+    const TickType_t xIdleInterval = pdMS_TO_TICKS(1000 / CONTROL_FREQ_IDLE);
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    // 初始化时等待一次基准时钟
+    vTaskDelayUntil(&xLastWakeTime, xIdleInterval);
     while (1)
     {
         // 动态检测状态（增加滤波防止抖动）
@@ -64,20 +73,15 @@ void MotorTask_doTask(void* arg)
         }
 
         // 更新频率（滞回阈值）
-        if (activeCount >= 8)
-        {
-            interval = osKernelGetTickFreq() / CONTROL_FREQ_ACTIVE;
-        }
-        else if (activeCount <= 2)
-        {
-            interval = osKernelGetTickFreq() / CONTROL_FREQ_IDLE;
-        }
+        const TickType_t xCurrentInterval =
+            (activeCount >= DEFAULT_HYSTERESIS_THRESH) ? xActiveInterval : xIdleInterval;
 
-        // 执行状态更新
+        // 执行状态更新（确保原子性）
+        taskENTER_CRITICAL();
         MotorService_updateState(service);
+        taskEXIT_CRITICAL();
 
-        // 精确等待
-        osDelayUntil(lastWake + interval);
-        lastWake = osKernelGetTickCount();
+        // 精确周期延迟（带自动补偿）
+        vTaskDelayUntil(&xLastWakeTime, xCurrentInterval);
     }
 }

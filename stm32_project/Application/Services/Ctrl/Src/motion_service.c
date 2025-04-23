@@ -8,7 +8,7 @@
 #include "log_manager.h"
 #include "error_code.h"
 #include <math.h>
-
+#include "motion_task.h"
 #define LOCK_TIMEOUT_MS 50
 
 static void handleEmergencyStop(const MotionContext* ctx);
@@ -106,6 +106,9 @@ int MotionContext_Init(MotionContext* ctx, MotorService* motor, SteerInstance* s
         LOG_ERROR(LOG_MODULE_MOTION, "Mutex create failed!");
         return -2;
     }
+
+    // 创建任务
+    MotionTask_init(ctx);
     return 0;
 }
 
@@ -605,7 +608,8 @@ static void handleDirectControl(MotionContext* ctx, const MotionTarget* target)
                               target->params.directCtrl.rightRpm);
 
     // 舵机角度
-    SteerService_setAngleSmoothly(ctx->steerServo, (float)target->params.directCtrl.steerAngle, 200);
+    SteerService_setAngleSmoothly(ctx->steerServo, target->params.directCtrl.steerAngle);
+    // SteerService_setAngleImmediate(ctx->steerServo, target->params.directCtrl.steerAngle);
 }
 
 static void handleDifferentialControl(MotionContext* ctx, const MotionTarget* target)
@@ -642,7 +646,7 @@ static void handleAckermannSteering(MotionContext* ctx, const MotionTarget* targ
     const float baseRpm = calculateRpmFromVelocity(linearVel, wheelRadiusM);
 
     // 执行控制
-    SteerService_setAngleSmoothly(ctx->steerServo, clampedAngle, 200);
+    SteerService_setAngleSmoothly(ctx->steerServo, clampedAngle);
     MotorService_setTargetRPM(ctx->motorService, MOTOR_LEFT_WHEEL, baseRpm);
     MotorService_setTargetRPM(ctx->motorService, MOTOR_RIGHT_WHEEL, baseRpm);
 }
@@ -692,7 +696,7 @@ static void handleMixedSteering(MotionContext* ctx, const MotionTarget* target)
     calculateDifferentialRPM(config, linearVel, angularVel * blendFactor, &leftRpm, &rightRpm);
 
     // 4. 执行控制
-    SteerService_setAngleSmoothly(ctx->steerServo, finalSteer, 200);
+    SteerService_setAngleSmoothly(ctx->steerServo, finalSteer);
     MotorService_setTargetRPM(ctx->motorService, MOTOR_LEFT_WHEEL, leftRpm);
     MotorService_setTargetRPM(ctx->motorService, MOTOR_RIGHT_WHEEL, rightRpm);
 

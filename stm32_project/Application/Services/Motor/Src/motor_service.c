@@ -15,7 +15,7 @@
 #include "pid_controller.h"
 
 
-#define LOCK_TIMEOUT_MS 50
+#define LOCK_TIMEOUT_MS (50)
 
 static float calculateOdometer(float revolutions, float wheelRadiusMM);
 

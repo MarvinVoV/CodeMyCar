@@ -9,7 +9,7 @@
 #include "cmsis_os.h"
 #include "queue_manager.h"
 
-#define MAX_HANDLERS 8
+#define MAX_HANDLERS (8)
 
 static QueueHandler_t handlers[MAX_HANDLERS];
 static uint32_t handler_count = 0;

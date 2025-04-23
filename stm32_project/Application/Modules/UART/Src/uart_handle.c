@@ -19,7 +19,7 @@
 #include "uart_config.h"
 
 
-#define RAW_DATA_QUEUE_SIZE 16  // 定义队列大小
+#define RAW_DATA_QUEUE_SIZE (16)  // 定义队列大小
 
 uart_dma_buffer_t uart_dma_buffer;
 

@@ -12,8 +12,8 @@
 
 // 定义舵机相关参数
 
-#define SERVO_ANGLE_MIN 0     // 最小角度 (0°)
-#define SERVO_ANGLE_MAX 180   // 最大角度 (180°)
+#define SERVO_ANGLE_MIN (0)     // 最小角度 (0°)
+#define SERVO_ANGLE_MAX (180)   // 最大角度 (180°)
 
 
 typedef struct

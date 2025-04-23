@@ -34,23 +34,13 @@ void ServoTask_doTask(void* pvParameters)
 
     while (1)
     {
-        // 获取当前配置（线程安全）
-        uint16_t intervalMs;
-        osMutexAcquire(instance->mutex, osWaitForever);
-        intervalMs = instance->config.updateIntervalMs;
-        osMutexRelease(instance->mutex);
-
-
         /* 执行控制更新 */
         SteerService_update(instance);
 
-        /* 计算下一次唤醒时间（绝对时间点） */
-        const uint32_t nextWakeTime = lastWakeTime + pdMS_TO_TICKS(intervalMs);
-
         /* 精确延时到指定时间点（单参数调用） */
-        osDelayUntil(nextWakeTime);
+        osDelayUntil(lastWakeTime + pdMS_TO_TICKS(instance->config.updateIntervalMs));
 
         /* 更新基准时间 */
-        lastWakeTime = nextWakeTime;
+        lastWakeTime = osKernelGetTickCount();
     }
 }

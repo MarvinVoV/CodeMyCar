@@ -14,26 +14,28 @@
 #include "servo_driver.h"
 
 // 默认移动速度 200ms/度
-#define SERVO_DEFAULT_SPEED_MS 200
+#define SERVO_DEFAULT_SPEED_MS (200)
 
 /*--------------------- 配置参数 ---------------------*/
 typedef struct
 {
-    float minAngleDeg;         // 机械最小角度（度）
-    float maxAngleDeg;         // 机械最大角度（度）
-    float deadZoneDeg;         // 死区角度（度）
-    float defaultStepDeg;      // 默认单步角度（度）
-    uint16_t updateIntervalMs; // 控制周期（毫秒）
+    float minAngleDeg;            // 机械最小角度（度）
+    float maxAngleDeg;            // 机械最大角度（度）
+    float deadZoneDeg;            // 死区角度（度）
+    float defaultStepDeg;         // 默认单步角度（度）
+    float maxSpeedDegPerSec;      // 最大速度：90°/秒（即 0.025°/ms）
+    float accelerationDegPerSec2; // 加速度：180°/秒²（即 0.18°/ms²）
+    uint16_t updateIntervalMs;    // 控制周期（毫秒）
 } SteerConfig;
 
 /*--------------------- 运行时状态 ---------------------*/
 // 运动状态枚举
 typedef enum
 {
-    STEER_STATE_IDLE = 0x01, // 空闲状态
-    STEER_STATE_MOVING,      // 运动中
-    STEER_STATE_ERROR,       // 错误状态
-    STEER_STATE_CALIBRATING  // 校准中
+    STEER_MOTION_STATE_IDLE = 0x01, // 空闲状态
+    STEER_MOTION_STATE_MOVING,      // 运动中
+    STEER_MOTION_STATE_ERROR,       // 错误状态
+    STEER_MOTION_STATE_CALIBRATING  // 校准中
 } SteerMotionState;
 
 typedef struct
@@ -47,9 +49,16 @@ typedef struct
 
 typedef struct
 {
-    float startAngleDeg; // 起始角度（浮点精度）
-    float remainingDeg;  // 剩余角度（度）替代步数
-    float stepDeg;       // 单步角度（可小于1度）
+    float targetAngleDeg;        // 目标角度
+    float currentSpeedDegPerMs;  // 当前速度（度/毫秒）
+    float accelerationDegPerMs2; // 加速度（度/毫秒²）
+    float maxSpeedDegPerMs;      // 最大速度（度/毫秒）
+    enum {
+        STEER_STATE_ACCEL,
+        STEER_STATE_CRUISE,
+        STEER_STATE_DECEL,
+        STEER_STATE_IDLE
+    } state;
 } SmoothControlContext;
 
 typedef struct
@@ -90,14 +99,13 @@ int SteerService_init(SteerInstance* steerInstance, SteerConfig* config, ServoDr
  * @brief 平滑设置舵机角度（亚角度级精度）
  * @param instance 舵机实例指针
  * @param angle 目标角度（单位：度，支持小数精度）
- * @param speedMs 移动速度（单位：毫秒/度，0表示使用默认速度）
  * @return int 错误码：
  *   - ERR_SUCCESS 操作成功
  *   - ERR_INVALID_PARAM 参数无效
  *   - ERR_ANGLE_OUTOFRANGE 目标角度超出机械限制
  * @note 实际运动时间 = fabs(目标角度 - 当前角度) * speedMs
  */
-int SteerService_setAngleSmoothly(SteerInstance* instance, float angle, uint16_t speedMs);
+int SteerService_setAngleSmoothly(SteerInstance* instance, float angle);
 
 /**
  * @brief 立即设置舵机角度（无过渡）

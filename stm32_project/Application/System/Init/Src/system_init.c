@@ -147,15 +147,18 @@ int System_Initialize()
     };
 
     steerConfig = (SteerConfig){
-        .minAngleDeg = -45,
-        .maxAngleDeg = 45,
+        .minAngleDeg = 0,
+        .maxAngleDeg = 180,
         .deadZoneDeg = 2,
-        .updateIntervalMs = 20
+        .updateIntervalMs = 20,
+        .maxSpeedDegPerSec = 90.0f,      // 最大速度：90°/秒（即 0.025°/ms）
+        .accelerationDegPerSec2 = 180.0f // 加速度：180°/秒²（即 0.18°/ms²）
     };
 
     steerInstance = (SteerInstance){
         .driver = &servoDriver
     };
+
 
     // 初始化转向服务
     if (SteerService_init(&steerInstance, &steerConfig, &servoDriver) != ERR_SUCCESS)

@@ -11,8 +11,8 @@
 #include "stm32h7xx_hal.h"
 #include "log_manager.h"
 
-#define SERVO_MIN_PULSE 500   // 最小脉冲宽度 (500us)
-#define SERVO_MAX_PULSE 2500  // 最大脉冲宽度 (2500us)
+#define SERVO_MIN_PULSE (500)   // 最小脉冲宽度 (500us)
+#define SERVO_MAX_PULSE (2500)  // 最大脉冲宽度 (2500us)
 
 typedef struct
 {

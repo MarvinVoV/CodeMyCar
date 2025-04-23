@@ -21,6 +21,7 @@ typedef struct
     float maxAngularVelRad;     // 最大角速度rad/s
     float maxLinearVelocityMPS; // 最大线速度 m/s
 } ChassisConfig;
+
 //
 // typedef enum
 // {
@@ -63,8 +64,8 @@ typedef struct
         // 直接转速控制
         struct
         {
-            float leftRpm;  // 左轮目标转速
-            float rightRpm; // 右轮目标转速
+            float leftRpm;    // 左轮目标转速
+            float rightRpm;   // 右轮目标转速
             float steerAngle; // 前轮转向角 (deg)
         } directCtrl;
 
@@ -84,7 +85,7 @@ typedef struct
 {
     // --- 基础状态 ---
     MotionMode currentMode; // 当前控制模式
-    uint32_t timestamp;         // 状态更新时间戳 (ms)
+    uint32_t timestamp;     // 状态更新时间戳 (ms)
 
     // --- 执行器状态 ---
     struct
@@ -259,6 +260,13 @@ void MotionService_GetState(const MotionContext* ctx, MotionState* outState);
  * @return int 0=成功，-1=仍有未恢复故障
  */
 int MotionService_ClearFaults(MotionContext* ctx);
+
+
+/**
+ * @brief 运行运动控制服务 task中调用
+ * @param ctx context
+ */
+void MotionService_Run(MotionContext* ctx);
 
 
 #endif /* SERVICES_CTRL_INC_MOTION_SERVICE_H_ */
