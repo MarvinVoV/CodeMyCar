@@ -173,24 +173,31 @@ int main(void)
     /* add threads, ... */
 
   // 初始化日志模块
-  LogManager_Init();
-  // UART1 for local debug
-  static log_output_channel debug_channel = {
-      .huart = &huart1,
-      .level_filter = LOG_LEVEL_ALL,
-      .module_filter = LOG_MODULE_ALL,
-      .direct_output = true
-  };
+  static const log_manager_config_t log_config = {
+    .channel_count = 1,
+    .channels = {
+      // 通道0: 本地调试输出（UART1）
+      {
+        .huart = &huart1,
+        .level_mask = LOG_LEVEL_ALL,
+        .module_mask = LOG_MODULE_ALL,
+        .direct_output = true
+        },
 
-  static log_output_channel esp32_channel = {
-    .huart = &huart4,
-    .level_filter = LOG_LEVEL_ALL,
-    .module_filter = LOG_MODULE_ALL,
-    .direct_output = false
+    // 通道1: ESP32模块（UART4） - 注释掉表示未使用
+    /*
+        {
+            .huart = &huart4,
+            .level_mask = LOG_LEVEL_ALL,
+            .module_mask = LOG_MODULE_ALL,
+            .direct_output = false
+        },
+    */
+    }
   };
+  LogManager_Config(&log_config);
+  LOG_INFO(LOG_MODULE_SYSTEM ,"hello log");
 
-  LogManager_AddOutputChannel(&esp32_channel);
-  LogManager_AddOutputChannel(&debug_channel);
 
   // 初始化控制任务
   CtrlTask_Init();
@@ -623,8 +630,8 @@ static void MX_DMA_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOF_CLK_ENABLE();
@@ -642,8 +649,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -711,7 +718,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE BEGIN Callback 0 */
 
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM6) {
+  if (htim->Instance == TIM6)
+  {
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
@@ -733,8 +741,7 @@ void Error_Handler(void)
     }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.

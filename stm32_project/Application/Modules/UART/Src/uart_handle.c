@@ -46,7 +46,7 @@ void start_reception()
     {
         char err_msg[64];
         sprintf(err_msg, "HAL_UARTEx_ReceiveToIdle_DMA Error");
-        LOG_DEBUG_UART(&huart1, "UART Error: %s", err_msg);
+        DEBUG_CONSOLE_OUTPUT(&huart1, "UART Error: %s", err_msg);
     }
 }
 
@@ -105,7 +105,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef* huart)
         if (err & HAL_UART_ERROR_ORE) strcat(err_msg, "OverrunError ");
         if (err & HAL_UART_ERROR_DMA) strcat(err_msg, "DMAError ");
 
-        LOG_DEBUG_UART(&huart1, "UART Error: %s", err_msg);
+        DEBUG_CONSOLE_OUTPUT(&huart1, "UART Error: %s", err_msg);
         // 清除错误标志
         __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_PEF | UART_CLEAR_NEF | UART_CLEAR_FEF | UART_CLEAR_OREF);
         // 重置错误码

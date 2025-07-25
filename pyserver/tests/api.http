@@ -16,8 +16,8 @@ Content-Type: application/json
   "motion": {
     "mode": 1,
     "params": {
-      "left_rpm": 5,
-      "right_rpm": 5,
+      "left_rpm": 0,
+      "right_rpm": 0,
       "steer_angle": 900
     },
     "duration": 10
