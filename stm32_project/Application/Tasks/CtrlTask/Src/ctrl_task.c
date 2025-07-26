@@ -7,10 +7,12 @@
 #include "ctrl_task.h"
 
 #include "cmd_process.h"
+#include "error_code.h"
 #include "log_manager.h"
 #include "pkt_protocol_buf.h"
 #include "queue_manager.h"
 #include "uart_handle.h"
+#include "system_init.h"
 
 // 累积缓冲区大小
 #define ACCUMULATE_BUF_SIZE ( 5 * PROTOCOL_MAX_DATA_LEN)
@@ -54,9 +56,9 @@ void CtrlTask_doTask(void* args)
             if (uart_dma_buffer.length > 0)
             {
                 // 获取非活动缓冲区的索引和长度
-                const uint8_t inactive_buffer = uart_dma_buffer.current ^ 1;
-                uint8_t* data = uart_dma_buffer.rx_buffer[inactive_buffer];
-                const uint16_t len = uart_dma_buffer.length;
+                const uint8_t  inactive_buffer = uart_dma_buffer.current ^ 1;
+                uint8_t*       data            = uart_dma_buffer.rx_buffer[inactive_buffer];
+                const uint16_t len             = uart_dma_buffer.length;
                 if (len == 0) continue;
 
                 // 无效化 Cache（H7 的 Cache 行大小为 32 字节）
@@ -70,16 +72,24 @@ void CtrlTask_doTask(void* args)
 
 static void dispatcher(uint8_t type, const uint8_t* cmd_payload, const uint16_t total_len)
 {
-    ControlCmdError cmdError;
-    if (!validateControlCmd(cmd_payload, total_len, &cmdError))
+    const int32_t error_code = validateControlCmd(cmd_payload, total_len);
+    if (error_code != ERR_SUCCESS)
     {
-        LOG_ERROR(LOG_MODULE_SYSTEM, "ctrl_cmd_t validation failed with error code: %d", cmdError);
+        LOG_ERROR(LOG_MODULE_SYSTEM, "ctrl_cmd_t validation failed with error code: %d", error_code);
         return;
     }
 
-    ControlCmd* cmd = (ControlCmd*)cmd_payload;
+    const ControlCmd* cmd = (ControlCmd*)cmd_payload;
 
-    CmdProcessor_processCommand(cmd);
+    const SystemContext* system_context = System_GetContext();
+    if (system_context != NULL)
+    {
+        CmdProcessorContext* cmd_context = system_context->cmdContext;
+        if (cmd_context != NULL)
+        {
+            CmdProcessor_ProcessCommand(cmd_context, cmd);
+        }
+    }
 }
 
 static void process_raw_data(const uint8_t* raw_data, const uint16_t len)

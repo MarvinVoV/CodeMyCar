@@ -8,6 +8,8 @@
 
 #include <stdbool.h>
 
+#include "error_code.h"
+
 /**
  * @brief 检查是否包含指定控制字段
  * @param fields 当前控制字段掩码
@@ -25,8 +27,8 @@ bool isCtrlFieldsSet(const uint8_t fields, const uint8_t checkFields)
 }
 
 
-bool validateControlCmd(const uint8_t* cmdPayload, uint16_t totalLen, ControlCmdError* error)
+int validateControlCmd(const uint8_t* cmd, uint16_t len)
 {
     // todo
-    return true;
+    return ERR_SUCCESS;
 }

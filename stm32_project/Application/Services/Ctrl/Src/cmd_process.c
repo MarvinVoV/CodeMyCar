@@ -10,121 +10,219 @@
 #include "log_manager.h"
 #include "ctrl_protocol.h"
 
+//------------------------------------------------------------------------------
+// 常量定义
+//------------------------------------------------------------------------------
 
-static float decodeLinearVel(uint16_t value);
-static float decodeSteerAngle(uint16_t deg);
-static float decodeAngularVel(uint16_t angularVel);
+/// 互斥锁超时时间 (ms)
+#define CMD_MUTEX_TIMEOUT_MS (50)
+
+/// 最小有效线速度 (m/s)
+#define MIN_LINEAR_VELOCITY (0.001f)
+
+/// 最小有效角速度 (rad/s)
+#define MIN_ANGULAR_VELOCITY (0.001f)
 
 
-static CmdProcessorContext* ctx;
+//------------------------------------------------------------------------------
+// 静态函数声明
+//------------------------------------------------------------------------------
 
-void CmdProcessor_Init(CmdProcessorContext* commandContext)
+/// 解码线速度
+static float decode_linear_vel(int16_t value);
+
+/// 解码转向角
+static float decode_steer_angle(int16_t deg);
+
+/// 解码角速度
+static float decode_angular_vel(int16_t angular_vel);
+
+/// 解码占空比
+static float decode_duty_cycle(int16_t duty);
+
+/// 处理运动指令
+static int process_motion_command(CmdProcessorContext* ctx, const MotionCmd* motion);
+
+
+//------------------------------------------------------------------------------
+// 公共API实现
+//------------------------------------------------------------------------------
+
+
+int CmdProcessor_Init(CmdProcessorContext* ctx, MotionContext* motionContext)
 {
-    if (!commandContext->motionContext)
+    // 参数验证
+    if (ctx == NULL || motionContext == NULL)
     {
-        return;
+        LOG_ERROR(LOG_MODULE_CMD, "Invalid parameters");
+        return ERR_CMD_INVALID_PARAM;
     }
-    ctx = commandContext;
+
+
+    // 初始化结构体
+    memset(ctx, 0, sizeof(CmdProcessorContext));
+
+    // 设置运动上下文
+    ctx->motionContext = motionContext;
+
+    // 创建互斥锁
+    ctx->mutex = osMutexNew(NULL);
+    if (ctx->mutex == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_CMD, "Mutex creation failed");
+        return ERR_CMD_MUTEX_FAIL;
+    }
+
+    return ERR_SUCCESS;
 }
 
-void CmdProcessor_processCommand(ControlCmd* cmd)
+int CmdProcessor_ProcessCommand(CmdProcessorContext* ctx, const ControlCmd* cmd)
 {
-    // 1. 安全校验
-    if (!ctx) return;
+    // 参数验证
+    if (ctx == NULL || cmd == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_CMD, "Invalid parameters");
+        return ERR_CMD_INVALID_PARAM;
+    }
 
-    // 2. 处理运动指令
+    // 获取互斥锁
+    if (osMutexAcquire(ctx->mutex, CMD_MUTEX_TIMEOUT_MS) != osOK)
+    {
+        LOG_WARN(LOG_MODULE_CMD, "Mutex timeout");
+        return ERR_CMD_MUTEX_TIMEOUT;
+    }
+
+    int ret = ERR_SUCCESS;
+    // 处理运动指令
     if (cmd->fields & CTRL_FIELD_MOTION)
     {
-        MotionCmd* motion = &cmd->motion;
-        MotionContext* motionCtx = ctx->motionContext;
+        ret = process_motion_command(ctx, &cmd->motion);
+    }
 
-        int ret = ERR_SUCCESS;
-        // 模式切换前检查
-        if (motion->mode != MOTION_EMERGENCY_STOP)
-        {
-            ret = MotionService_SetControlMode(motionCtx, motion->mode);
-            if (ret != ERR_SUCCESS)
-            {
-                LOG_ERROR(LOG_MODULE_CMD, "Mode switch failed: 0x%02X", motion->mode);
-                return;
-            }
-        }
+    // 其他指令处理预留
+    // if (cmd->fields & CTRL_FIELD_SENSOR) { ... }
 
-        // 模式分派处理
-        switch (motion->mode)
-        {
-            case MOTION_EMERGENCY_STOP:
-                MotionService_EmergencyStop(motionCtx);
-                break;
+    osMutexRelease(ctx->mutex);
+    return ret;
+}
 
-            case MOTION_DIFFERENTIAL:
-                {
-                    const float linear = decodeLinearVel(motion->params.diffCtrl.linearVel);
-                    const float angular = decodeAngularVel(motion->params.diffCtrl.angularVel);
-                    ret = MotionService_SetVelocity(motionCtx, linear, angular);
-                    break;
-                }
 
-            case MOTION_STEER_ONLY:
-                {
-                    const float linear = decodeLinearVel(motion->params.kinematicCtrl.linearVel);
-                    const float steer = decodeAngularVel(motion->params.kinematicCtrl.steerAngle);
-                    ret = MotionService_SetAckermannParams(motionCtx, linear, steer);
-                    break;
-                }
+//------------------------------------------------------------------------------
+// 内部函数实现
+//------------------------------------------------------------------------------
 
-            case MOTION_DIRECT_CONTROL:
-                {
-                    const float leftRpm = motion->params.directCtrl.leftRpm;
-                    const float rightRpm = motion->params.directCtrl.rightRpm;
-                    const float steer = decodeSteerAngle(motion->params.directCtrl.steerAngle);
-                    ret = MotionService_SetDirectControl(motionCtx, leftRpm, rightRpm, steer);
-                    break;
-                }
 
-            case MOTION_MIXED_STEER:
-                {
-                    const DiffCtrlParam* base = &motion->params.mixedCtrl.base;
-                    const float linear = decodeLinearVel(base->linearVel);
-                    const float angular = decodeAngularVel(base->angularVel);
-                    const float steer = decodeSteerAngle(motion->params.mixedCtrl.steerAngle);
-                    const float gain = motion->params.mixedCtrl.differentialGain;
-                    ret = MotionService_SetHybridParams(motionCtx, linear, angular, steer, gain);
-                    break;
-                }
+static int process_motion_command(CmdProcessorContext* ctx, const MotionCmd* motion)
+{
+    MotionContext* motionCtx = ctx->motionContext;
+    int            ret       = ERR_SUCCESS;
 
-            case MOTION_SPIN_IN_PLACE:
-                {
-                    const DiffCtrlParam* p = &motion->params.diffCtrl;
-                    const float angular = decodeAngularVel(p->angularVel);
-                    ret = MotionService_SetSpinParams(motionCtx, angular);
-                    break;
-                }
-
-            default:
-                LOG_ERROR(LOG_MODULE_CMD, "Unknown motion mode: 0x%02X", motion->mode);
-                ret = ERR_INVALID_PARAM;
-                break;
-        }
-        // 处理执行结果
+    // 模式切换前检查
+    if (motion->mode != MOTION_EMERGENCY_STOP)
+    {
+        ret = MotionService_SetControlMode(motionCtx, motion->mode);
         if (ret != ERR_SUCCESS)
         {
-            LOG_ERROR(LOG_MODULE_CMD, "Command execute failed: 0x%04X", ret);
+            LOG_ERROR(LOG_MODULE_CMD, "Mode switch failed: 0x%02X, error: 0x%04X", motion->mode, ret);
+            return ERR_MOTION_MODE_TRANSITION;
         }
     }
+
+    // 模式分派处理
+    switch (motion->mode)
+    {
+        case MOTION_EMERGENCY_STOP:
+            ret = MotionService_EmergencyStop(motionCtx);
+            break;
+
+        case MOTION_DIFFERENTIAL:
+            {
+                const float linear  = decode_linear_vel(motion->params.diffCtrl.linearVel);
+                const float angular = decode_angular_vel(motion->params.diffCtrl.angularVel);
+                ret                 = MotionService_SetDifferentialParams(motionCtx, linear, angular);
+            }
+            break;
+
+        case MOTION_STEER_PARALLEL:
+            {
+                const float linear = decode_linear_vel(motion->params.steerParallelCtrl.linearVel);
+                const float steer  = decode_steer_angle(motion->params.steerParallelCtrl.steerAngle);
+                ret                = MotionService_SetSteerParallelParams(motionCtx, linear, steer);
+            }
+            break;
+
+        case MOTION_DIRECT_CONTROL:
+            {
+                const float leftRpm  = (float)motion->params.directCtrl.leftRpm;
+                const float rightRpm = (float)motion->params.directCtrl.rightRpm;
+                const float steer    = decode_steer_angle(motion->params.directCtrl.steerAngle);
+                ret                  = MotionService_SetDirectControlParams(motionCtx, leftRpm, rightRpm, steer);
+            }
+            break;
+
+        case MOTION_MIXED_STEER:
+            {
+                const MixedCtrlParam* mixed = &motion->params.mixedCtrl;
+                const float           steer = decode_steer_angle(mixed->steerAngle);
+                const float           gain  = (float)mixed->differentialGain / 100.0f; // 百分比转0.0~1.0
+
+                if (mixed->driveCtrlType == DRIVE_CTRL_VELOCITY)
+                {
+                    // 速度控制模式
+                    const float linear = decode_linear_vel(mixed->driveParams.velocityCtrl.linearVel);
+                    const float angular = decode_angular_vel(mixed->driveParams.velocityCtrl.angularVel);
+                    ret = MotionService_SetMixedVelocityParams(ctx->motionContext, linear, angular, steer, gain);
+                }
+                else
+                {
+                    // 占空比控制模式
+                    const float left_duty = decode_duty_cycle(mixed->driveParams.dutyCycleCtrl.leftDutyCycle);
+                    const float right_duty = decode_duty_cycle(mixed->driveParams.dutyCycleCtrl.rightDutyCycle);
+                    ret = MotionService_SetMixedDutyParams(ctx->motionContext, left_duty, right_duty, steer, gain);
+                }
+            }
+            break;
+
+        case MOTION_SPIN_IN_PLACE:
+            {
+                const float angular = decode_angular_vel(motion->params.diffCtrl.angularVel);
+                ret                 = MotionService_SetSpinParams(motionCtx, angular);
+            }
+            break;
+
+        default:
+            LOG_ERROR(LOG_MODULE_CMD, "Unknown motion mode: 0x%02X", motion->mode);
+            ret = ERR_MOTION_INVALID_MODE;
+            break;
+    }
+
+    // 处理执行结果
+    if (ret != ERR_SUCCESS)
+    {
+        LOG_ERROR(LOG_MODULE_CMD, "Command execute failed: mode=0x%02X, error=0x%04X", motion->mode, ret);
+        return ERR_CMD_EXECUTION_FAIL;
+    }
+
+    return ERR_SUCCESS;
 }
 
-static float decodeLinearVel(const uint16_t value)
+static float decode_linear_vel(const int16_t value)
 {
-    return (float)value * 0.001f; // 0.01 m/s分辨率
+    return (float)value * 0.001f; // 0.001 m/s分辨率
 }
 
-static float decodeSteerAngle(const uint16_t deg)
+static float decode_steer_angle(const int16_t deg)
 {
     return (float)deg * 0.1f; // 0.1度分辨率
 }
 
-static float decodeAngularVel(const uint16_t angularVel)
+static float decode_angular_vel(const int16_t angular_vel)
 {
-    return (float)angularVel * 0.0644f; // 0.0644rad/s分辨率
+    return (float)angular_vel * 0.0644f; // 0.0644 rad/s分辨率
+}
+
+static float decode_duty_cycle(const int16_t duty)
+{
+    // 转换为百分比 (-100.0% ~ 100.0%)
+    return (float)duty / 10.0f;
 }

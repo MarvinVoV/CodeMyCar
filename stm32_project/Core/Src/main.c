@@ -173,7 +173,7 @@ int main(void)
     /* add threads, ... */
 
   // 初始化日志模块
-  static const log_manager_config_t log_config = {
+  static log_manager_config_t log_config = {
     .channel_count = 1,
     .channels = {
       // 通道0: 本地调试输出（UART1）

@@ -92,21 +92,21 @@ int System_Initialize()
     };
 
     motorLeftDriver = (MotorDriver){
-        .hal_cfg = &motorLeftHalConfig,
+        .halCfg = &motorLeftHalConfig,
         .spec = &motorSpec,
         .control = {
             .mode = MOTOR_DRIVER_MODE_STOP,
-            .pidControl = &motorPicController,
+            .pidCtrl = motorPicController,
             .targetRPM = 0.0f,
         }
     };
 
     motorRightDriver = (MotorDriver){
-        .hal_cfg = &motorRightHalConfig,
+        .halCfg = &motorRightHalConfig,
         .spec = &motorSpec,
         .control = {
             .mode = MOTOR_DRIVER_MODE_STOP,
-            .pidControl = &motorPicController,
+            .pidCtrl = motorPicController,
             .targetRPM = 0.0f,
         }
     };
@@ -182,7 +182,7 @@ int System_Initialize()
     commandContext = (CmdProcessorContext){
         .motionContext = &motionContext
     };
-    CmdProcessor_Init(&commandContext);
+    CmdProcessor_Init(&commandContext, &motionContext);
 
 
     sysCtx.motionContext = &motionContext;

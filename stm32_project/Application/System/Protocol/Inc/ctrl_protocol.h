@@ -10,95 +10,110 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "motion_common.h"
 
 #pragma pack(push, 1)
 
-/*---------------------- 控制掩码定义 ----------------------*/
+
+//------------------------------------------------------------------------------
+// 类型定义
+//------------------------------------------------------------------------------
+/**
+ * @brief 控制字段掩码
+ */
 typedef enum
 {
-    CTRL_FIELD_MOTION = (1 << 0) // 运动控制
+    CTRL_FIELD_MOTION = 0x01, ///< 运动控制字段
+    CTRL_FIELD_SENSOR = 0x02, ///< 传感器控制字段
+    CTRL_FIELD_ALL    = 0x0F  ///< 所有控制字段
 } CtrlField;
 
 
-/*---------------------- 高层运动控制定义 ----------------------*/
-typedef enum
-{
-    MOTION_EMERGENCY_STOP = 0x00, // 紧急停止
-    MOTION_DIRECT_CONTROL = 0x01, // 直接控制模式
-    MOTION_DIFFERENTIAL = 0x02,   // 纯差速控制（舵机归中）
-    MOTION_STEER_ONLY = 0x03,     // 前轮转向模式（阿克曼转向几何模型）
-    MOTION_SPIN_IN_PLACE = 0x04,  // 原地旋转模式
-    MOTION_MIXED_STEER = 0x05     // 混合转向模式(舵机+差速)
-} MotionMode;
-
-// 差速控制参数（兼容混合模式）
+/**
+ * @brief 差速控制参数
+ */
 typedef struct
 {
-    int16_t linearVel;  // 0.001 m/s步长 (-32.767~+32.767 m/s) 缩放因子 0.001 m/s
-    int16_t angularVel; // 缩放因子0.0644 rad/s (-8.24 ~ +8.18 rad/s)
+    int16_t linearVel;  ///< 线速度 (0.001 m/s步长)
+    int16_t angularVel; ///< 角速度 (0.0644 rad/s步长)
 } DiffCtrlParam;
 
-// 直接控制参数
+
+/**
+ * @brief 直接控制参数
+ */
 typedef struct
 {
-    int16_t leftRpm;    // 1 RPM步长
-    int16_t rightRpm;   // 1 RPM步长
-    int16_t steerAngle; // 0.1度步长
+    int16_t leftRpm;    ///< 左轮目标转速 (RPM)
+    int16_t rightRpm;   ///< 右轮目标转速 (RPM)
+    int16_t steerAngle; ///< 转向角 (0.1度步长)
 } DirectCtrlParam;
 
-// 阿克曼转向参数
+/**
+ * @brief 平行转向参数
+ */
 typedef struct
 {
-    int16_t linearVel;  // 0.001 m/s步长 (-32.767~+32.767 m/s) 缩放因子 0.001 m/s
-    int16_t steerAngle; // 0.1度步长
-} AckermannParam;
+    int16_t linearVel;  ///< 线速度 (0.001 m/s步长)
+    int16_t steerAngle; ///< 转向角 (0.1度步长)
+} SteerParallelParam;
 
-// 混合控制参数
+/**
+ * @brief 混合控制参数
+ */
 typedef struct
 {
-    DiffCtrlParam base;       // 基础差速参数
-    int16_t steerAngle;       // 0.1度步长
-    uint8_t differentialGain; // 0-100% (步长0.392%)
-} MixedCtrlParam;
+    DriveControlType driveCtrlType; ///< 驱动控制类型
 
-// 运动控制主指令
-typedef struct
-{
-    MotionMode mode; // 运动模式
     union
     {
-        AckermannParam kinematicCtrl;
-        DirectCtrlParam directCtrl;
-        MixedCtrlParam mixedCtrl;
-        DiffCtrlParam diffCtrl;
-    } params;
+        // 速度控制参数
+        struct
+        {
+            int16_t linearVel;  ///< 目标线速度 (0.001 m/s步长)
+            int16_t angularVel; ///< 目标角速度 (0.0644 rad/s步长)
+        } velocityCtrl;
 
-    uint16_t duration; // 执行持续时间（ms）
+        // 占空比控制参数
+        struct
+        {
+            int16_t leftDutyCycle;  ///< 左轮占空比 (-1000~1000 表示 -100.0% ~ 100.0%)
+            int16_t rightDutyCycle; ///< 右轮占空比 (-1000~1000 表示 -100.0% ~ 100.0%)
+        } dutyCycleCtrl;
+    } driveParams;
+
+    int16_t steerAngle;       ///< 转向角 (0.1度步长)
+    uint8_t differentialGain; ///< 差速增益 (0-100%)
+} MixedCtrlParam;
+
+/**
+ * @brief 运动控制指令
+ */
+typedef struct
+{
+    MotionMode mode;     ///< 运动模式
+    uint16_t   duration; ///< 执行持续时间 (ms)
+    union
+    {
+        SteerParallelParam steerParallelCtrl; ///< 平行转向参数
+        DirectCtrlParam    directCtrl;        ///< 直接控制参数
+        MixedCtrlParam     mixedCtrl;         ///< 混合控制参数
+        DiffCtrlParam      diffCtrl;          ///< 差速控制参数
+    } params;
 } MotionCmd;
 
 
-/*---------------------- 主控制指令 ----------------------*/
+/**
+ * @brief 主控制指令
+ */
 typedef struct
 {
-    uint8_t ctrlId;   // 控制器ID
-    uint8_t fields;   // 控制字段（位掩码组合）
-    MotionCmd motion; // 运动控制参数
+    uint8_t   ctrlId; ///< 控制器ID (0-15)
+    uint8_t   fields; ///< 控制字段掩码
+    MotionCmd motion; ///< 运动控制指令
 } ControlCmd;
+
 #pragma pack(pop)
-
-
-// 错误码定义
-typedef enum
-{
-    CMD_ERR_NONE = 0,           // 无错误
-    CMD_ERR_INVALID_LENGTH,     // 数据长度不合法
-    CMD_ERR_RESERVED_FIELD,     // 保留字段被设置
-    CMD_ERR_INVALID_MOTOR_MODE, // 电机模式不合法
-    CMD_ERR_MOTOR_PARAM,        // 电机参数越界
-    CMD_ERR_SERVO_PARAM,        // 舵机参数越界
-    CMD_ERR_TEXT_LENGTH,        // 文本长度不合法
-    CMD_ERR_FIELD_CONFLICT      // 字段冲突
-} ControlCmdError;
 
 
 /**
@@ -119,12 +134,12 @@ bool isCtrlFieldsSet(uint8_t fields, uint8_t checkFields);
 
 
 /**
- * @brief 校验控制指令的完整性
- * @param cmdPayload 指令指针
- * @param totalLen 接收到的数据总长度
- * @param error 输出详细错误码
- * @return 是否合法
+ * @brief 验证控制指令完整性
+ *
+ * @param cmd 控制指令指针
+ * @param len 数据长度
  */
-bool validateControlCmd(const uint8_t* cmdPayload, uint16_t totalLen, ControlCmdError* error);
+int validateControlCmd(const uint8_t* cmd, uint16_t len);
+
 
 #endif /* SYSTEM_PROTOCOL_INC_CTRL_PROTOCOL_H_ */

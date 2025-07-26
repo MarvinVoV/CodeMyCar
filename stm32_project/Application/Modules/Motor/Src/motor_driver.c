@@ -6,17 +6,302 @@
  */
 
 
-#include <math.h>
-
 #include "motor_driver.h"
 #include "log_manager.h"
 
-static float rpmToRadps(float rpm);
-static float radpsToRpm(float radps);
-static float radpsToMps(float radps, float wheelRadiusMM);
-static float pulseToRad(int32_t pulses, float encoderPPR, float gearRatio);
-static void updateRevolutions(MotorDriverState* state, int32_t deltaPulses, float encoderPPR, float gearRatio);
-static float applySpeedFilter(MotorDriver* driver, float rawSpeed);
+/// 最小有效时间间隔 (1ms)
+#define MIN_DELTA_TIME_S 0.001f
+
+/// 默认速度滤波窗口大小
+#ifndef DEFAULT_SPEED_FILTER_WINDOW
+#define DEFAULT_SPEED_FILTER_WINDOW 5
+#endif
+
+
+//------------------------------------------------------------------------------
+// 静态函数声明
+//------------------------------------------------------------------------------
+/**
+ * @brief 将转速从RPM转换为rad/s
+ * @param rpm 转速 [RPM]
+ * @return float 角速度 [rad/s]
+ */
+static inline float rpm_to_radps(float rpm);
+/**
+ * @brief 将角速度从rad/s转换为RPM
+ * @param radps 角速度 [rad/s]
+ * @return float 转速 [RPM]
+ */
+static inline float radps_to_rpm(float radps);
+
+/**
+ * @brief 将角速度转换为线速度
+ * @param radps 角速度 [rad/s]
+ * @param wheel_radius_mm 轮半径 [mm]
+ * @return float 线速度 [m/s]
+ */
+static inline float radps_to_mps(float radps, float wheel_radius_mm);
+
+
+/**
+ * @brief 将编码器脉冲数转换为旋转弧度值
+ *
+ * @param pulses 编码器脉冲数，单位：个（count）
+ *              物理意义：四倍频后的累计脉冲数（包含方向信息）
+ * @param encoder_ppr 编码器每转脉冲数，单位：脉冲/转（Pulses Per Revolution）
+ *                  物理意义：编码器未倍频时每转输出的脉冲数
+ * @param gear_ratio 减速比，单位：无因次量（如30:1减速比则传入30.0）
+ * @return float 旋转角度值，单位：弧度（rad）
+ *
+ * @note 转换公式：
+ * radians = (pulses × 2π) / (4 × PPR × gearRatio)
+ * 四倍频说明：编码器每个脉冲周期产生4个计数（上升沿+下降沿×2通道），所以，4 * PPR 表示电机转一圈产生的总脉冲数（四倍频后）
+ * 示例：encoderPPR=13, gearRatio=30, pulses=1560时：
+ * (1560 × 6.2832) / (4 × 13 × 30) = 6.2832 rad（正好1转）
+ */
+static inline float pulses_to_rad(int32_t pulses, uint16_t encoder_ppr, uint16_t gear_ratio);
+
+/**
+ * @brief 更新累计转数
+ * @param state 状态结构体
+ * @param delta_pulses 脉冲增量
+ * @param encoder_ppr 编码器每转脉冲数
+ * @param gear_ratio 减速比
+ */
+static void update_revolutions(MotorDriverState* state,
+                               int32_t           delta_pulses,
+                               uint16_t          encoder_ppr,
+                               uint16_t          gear_ratio);
+
+/**
+ * @brief 应用速度滤波
+ * @param driver 驱动控制器
+ * @param raw_speed 原始速度值
+ * @return float 滤波后速度
+ */
+static float apply_speed_filter(MotorDriver* driver, float raw_speed);
+
+//------------------------------------------------------------------------------
+// 公共API实现
+//------------------------------------------------------------------------------
+
+bool MotorDriver_Init(MotorDriver* driver, const PID_Params* initialPid)
+{
+    // 参数检查
+    if (driver == NULL || driver->halCfg == NULL || driver->spec == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver initialization failed");
+        return false;
+    }
+
+    if (driver->spec->encoderPPR == 0 || driver->spec->gearRatio == 0)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Invalid encoderPPR or gearRatio");
+        return false;
+    }
+
+
+    // 初始化PID控制器
+    const PID_Params defaultPid = {
+        .kp = 1.0f,
+        .ki = 0.1f,
+        .kd = 0.05f,
+        .integral_max = 100.0f,
+        .output_max = 95.0f
+    };
+    PIDController_Init(&driver->control.pidCtrl, initialPid ? initialPid : &defaultPid);
+
+
+    // 初始化滤波系统
+    driver->filter.windowSize   = DEFAULT_SPEED_FILTER_WINDOW;
+    driver->filter.filterBuffer = (float*)pvPortMalloc(driver->filter.windowSize * sizeof(float));
+    if (driver->filter.filterBuffer == NULL)
+    {
+        LOG_WARN(LOG_MODULE_MOTOR, "Speed filter buffer allocation failed");
+        driver->filter.windowSize = 0;
+    }
+    else
+    {
+        // 初始化缓冲区
+        memset(driver->filter.filterBuffer, 0, driver->filter.windowSize * sizeof(float));
+        driver->filter.bufferIndex = 0;
+    }
+
+    // 状态初始化
+    memset(&driver->state, 0, sizeof(MotorDriverState));
+    driver->state.mode           = MOTOR_DRIVER_MODE_STOP;
+    driver->state.lastUpdateTick = HAL_GetTick();
+
+    // 初始化HAL层
+    if (HAL_Motor_Init(driver->halCfg) != HAL_OK)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL motor initialization failed");
+        return false;
+    }
+
+    return true;
+}
+
+void MotorDriver_SetMode(MotorDriver* driver, const MotorDriverMode mode)
+{
+    if (driver == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
+        return;
+    }
+
+    // 模式切换处理
+    if (driver->control.mode != mode)
+    {
+        switch (mode)
+        {
+            case MOTOR_DRIVER_MODE_CLOSED_LOOP:
+                // 重置PID状态
+                PID_Reset(&driver->control.pidCtrl);
+                break;
+            case MOTOR_DRIVER_MODE_OPEN_LOOP:
+                // 保留当前占空比
+                break;
+            case MOTOR_DRIVER_MODE_STOP:
+                HAL_Motor_EmergencyStop(driver->halCfg);
+                break;
+        }
+        driver->control.mode         = mode;
+        driver->state.lastUpdateTick = HAL_GetTick();
+    }
+}
+
+void MotorDriver_SetDutyCycle(MotorDriver* driver, const float duty)
+{
+    if (driver == NULL || driver->state.mode != MOTOR_DRIVER_MODE_OPEN_LOOP)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Invalid call to SetDutyCycle");
+        return;
+    }
+
+    // 限制占空比范围
+    const float clamped_duty = (duty > 100.0f) ? 100.0f : (duty < -100.0f) ? -100.0f : duty;
+
+    // 设置HAL层占空比
+    HAL_Motor_SetDuty(driver->halCfg, clamped_duty);
+
+    // 更新状态
+    driver->state.openLoopDuty = clamped_duty;
+}
+
+void MotorDriver_SetTargetRPM(MotorDriver* driver, const float rpm)
+{
+    if (driver == NULL)
+    {
+        return;
+    }
+
+    // 限制在规格范围内
+    const float max_rpm       = driver->spec->maxRPM;
+    driver->control.targetRPM = (rpm > max_rpm) ? max_rpm : (rpm < -max_rpm) ? -max_rpm : rpm;
+}
+
+void MotorDriver_Update(MotorDriver* driver)
+{
+    if (driver == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
+        return;
+    }
+    // 计算时间间隔
+    const uint32_t current_tick = HAL_GetTick();
+    const uint32_t last_tick    = driver->state.lastUpdateTick;
+    const float    delta_time_s = (current_tick > last_tick)
+                                   ? (float)(current_tick - last_tick) * 0.001f
+                                   : MIN_DELTA_TIME_S;
+    // 更新时间太短则跳过
+    if (delta_time_s < MIN_DELTA_TIME_S)
+    {
+        return;
+    }
+
+    // 更新编码器状态
+    const int32_t current_pulses = HAL_Motor_ReadEncoder(driver->halCfg);
+    const int32_t delta_pulses   = current_pulses - driver->state.position.totalPulses;
+
+    // 计算角速度 (rad/s): 实现了从脉冲增量到角速度的转换
+    // 每个脉冲对应的弧度值
+    const float rad_per_pulse = pulses_to_rad(1, driver->spec->encoderPPR, driver->spec->gearRatio);
+    // 角速度（弧度/秒） = (脉冲增量 * 每个脉冲的弧度值) / 时间间隔
+    const float raw_radps = ((float)delta_pulses * rad_per_pulse) / delta_time_s;
+
+    // 应用滤波
+    driver->state.velocity.radps = apply_speed_filter(driver, raw_radps);
+
+    // 更新其他速度单位
+    driver->state.velocity.rpm = radps_to_rpm(driver->state.velocity.radps);
+    driver->state.velocity.mps = radps_to_mps(driver->state.velocity.radps, driver->spec->wheelRadiusMM);
+
+    // 更新位置信息
+    driver->state.position.totalPulses = current_pulses;
+    update_revolutions(&driver->state, delta_pulses, driver->spec->encoderPPR, driver->spec->gearRatio);
+
+    // 更新时间戳
+    driver->state.lastUpdateTick = current_tick;
+
+    // 闭环控制处理
+    if (driver->state.mode == MOTOR_DRIVER_MODE_CLOSED_LOOP)
+    {
+        // 将目标RPM转换为rad/s
+        const float target_radps = rpm_to_radps(driver->control.targetRPM);
+
+        // 执行PID计算
+        const float output = PID_Calculate(&driver->control.pidCtrl, target_radps, delta_time_s);
+
+        // 应用输出
+        const float clamped_output = (output > 100.0f) ? 100.0f : (output < -100.0f) ? -100.0f : output;
+        HAL_Motor_SetDuty(driver->halCfg, clamped_output);
+    }
+}
+
+
+void MotorDriver_EmergencyStop(MotorDriver* driver)
+{
+    if (driver == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
+        return;
+    }
+
+    HAL_Motor_EmergencyStop(driver->halCfg);
+    driver->control.mode = MOTOR_DRIVER_MODE_STOP;
+    PID_Reset(&driver->control.pidCtrl);
+}
+
+MotorDriverState MotorDriver_getState(const MotorDriver* driver)
+{
+    MotorDriverState state = {0};
+    if (driver != NULL)
+    {
+        // 创建状态副本
+        memcpy(&state, &driver->state, sizeof(MotorDriverState));
+    }
+    return state;
+}
+
+void MotorDriver_ConfigurePID(MotorDriver* driver, const PID_Params* params)
+{
+    if (!driver || !params)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver or PID params is NULL");
+        return;
+    }
+
+    // 拷贝PID参数到控制器
+    memcpy(&driver->control.pidCtrl.params, params, sizeof(PID_Params));
+    // 重置积分项和微分历史状态
+    PID_Reset(&driver->control.pidCtrl);
+}
+
+
+//------------------------------------------------------------------------------
+// 静态函数实现
+//------------------------------------------------------------------------------
 
 /**
  * @brief 将转速从转每分钟（RPM）转换为弧度每秒（rad/s）
@@ -28,10 +313,11 @@ static float applySpeedFilter(MotorDriver* driver, float rawSpeed);
  * @note 转换公式：
  * rad/s = (RPM × 2π) / 60
  */
-static float rpmToRadps(const float rpm)
+static inline float rpm_to_radps(const float rpm)
 {
-    return (rpm * 2.0f * (float)M_PI) / 60.0f;
+    return rpm * (2.0f * (float)M_PI) / 60.0f;
 }
+
 
 /**
  * @brief 将输出轴的角速度（rad/s）转换为输出轴的转速（RPM）
@@ -44,16 +330,17 @@ static float rpmToRadps(const float rpm)
  * 示例：当 radps = 10.472 rad/s（≈ 100 RPM）时：
  * (10.472 × 60) / 6.283 ≈ 100 RPM
  */
-static float radpsToRpm(const float radps)
+static inline float radps_to_rpm(const float radps)
 {
-    return (radps * 60.0f) / (2.0f * (float)M_PI);
+    return radps * 60.0f / (2.0f * (float)M_PI);
 }
+
 
 /**
  * @brief 将角速度转换为线速度
  *
  * @param radps 角速度值，单位：弧度/秒（rad/s）
- * @param wheelRadiusMM 轮子半径，单位：毫米（mm）
+ * @param wheel_radius_mm 轮子半径，单位：毫米（mm）
  * @return float 线速度值，单位：米/秒（m/s）
  *
  * @note 转换公式：
@@ -63,19 +350,20 @@ static float radpsToRpm(const float radps)
  * 示例 当radps=10 rad/s，wheelRadiusMM=65 mm时：
  * 10 × (65 / 1000) = 0.65 m/s
  */
-static float radpsToMps(const float radps, const float wheelRadiusMM)
+static inline float radps_to_mps(const float radps, const float wheel_radius_mm)
 {
-    return radps * (wheelRadiusMM / 1000.0f);
+    return radps * (wheel_radius_mm / 1000.0f);
 }
+
 
 /**
  * @brief 将编码器脉冲数转换为旋转弧度值
  *
  * @param pulses 编码器脉冲数，单位：个（count）
  *              物理意义：四倍频后的累计脉冲数（包含方向信息）
- * @param encoderPPR 编码器每转脉冲数，单位：脉冲/转（Pulses Per Revolution）
+ * @param encoder_ppr 编码器每转脉冲数，单位：脉冲/转（Pulses Per Revolution）
  *                  物理意义：编码器未倍频时每转输出的脉冲数
- * @param gearRatio 减速比，单位：无因次量（如30:1减速比则传入30.0）
+ * @param gear_ratio 减速比，单位：无因次量（如30:1减速比则传入30.0）
  * @return float 旋转角度值，单位：弧度（rad）
  *
  * @note 转换公式：
@@ -84,18 +372,19 @@ static float radpsToMps(const float radps, const float wheelRadiusMM)
  * 示例：encoderPPR=13, gearRatio=30, pulses=1560时：
  * (1560 × 6.2832) / (4 × 13 × 30) = 6.2832 rad（正好1转）
  */
-static float pulseToRad(const int32_t pulses, const float encoderPPR, const float gearRatio)
+static inline float pulses_to_rad(const int32_t pulses, const uint16_t encoder_ppr, const uint16_t gear_ratio)
 {
-    return ((float)pulses * (float)M_PI * 2.0f) / (4.0f * encoderPPR * gearRatio);
+    return ((float)pulses * (float)M_PI * 2.0f) / (4.0f * (float)encoder_ppr * (float)gear_ratio);
 }
+
 
 /**
  * @brief 更新累计转数值
  *
  * @param state 电机状态对象指针
- * @param deltaPulses 增量脉冲数，单位：个（count）
- * @param encoderPPR 编码器每转脉冲数，单位：脉冲/转（Pulses Per Revolution）
- * @param gearRatio 减速比，单位：无因次量
+ * @param delta_pulses 增量脉冲数，单位：个（count）
+ * @param encoder_ppr 编码器每转脉冲数，单位：脉冲/转（Pulses Per Revolution）
+ * @param gear_ratio 减速比，单位：无因次量
  *
  * @note 转换过程：
  * 1. 脉冲数转弧度：pulseToRad()
@@ -105,258 +394,32 @@ static float pulseToRad(const int32_t pulses, const float encoderPPR, const floa
  * 简化为：
  * revolutions += deltaPulses / (4 × PPR × gearRatio)
  */
-static void updateRevolutions(MotorDriverState* state, const int32_t deltaPulses, const float encoderPPR,
-                              const float gearRatio)
+static void update_revolutions(MotorDriverState* state, const int32_t        delta_pulses,
+                               const uint16_t    encoder_ppr, const uint16_t gear_ratio)
 {
-    state->position.revolutions += (float)deltaPulses / (4.0f * encoderPPR * gearRatio);
+    state->position.revolutions += (float)delta_pulses / (4.0f * (float)encoder_ppr * (float)gear_ratio);
 }
 
-static float applySpeedFilter(MotorDriver* driver, float rawSpeed)
+static float apply_speed_filter(MotorDriver* driver, float raw_speed)
 {
-    if (driver->filter.speedFilterDepth == 0)
+    // 未启用滤波
+    if (driver->filter.windowSize == 0 || driver->filter.filterBuffer == NULL)
     {
-        // 启用默认滤波（窗口大小5）
-        driver->filter.speedFilterDepth = 5;
+        return raw_speed;
     }
 
-    // 更新滤波缓冲区
-    driver->filter.speedFilterBuf[driver->filter.filterIndex] = rawSpeed;
-    driver->filter.filterIndex = (driver->filter.filterIndex + 1) % driver->filter.speedFilterDepth;
+    // 添加新采样值
+    driver->filter.filterBuffer[driver->filter.bufferIndex] = raw_speed;
 
-    // 计算移动平均
+    // 移动平均滤波
     float sum = 0.0f;
-    for (uint8_t i = 0; i < driver->filter.speedFilterDepth; ++i)
+    for (uint8_t i = 0; i < driver->filter.windowSize; i++)
     {
-        sum += driver->filter.speedFilterBuf[i];
-    }
-    return sum / (float)driver->filter.speedFilterDepth;
-}
-
-void MotorDriver_Init(MotorDriver* driver, const PID_Params* initialPid)
-{
-    // 参数检查
-    if (!driver || !driver->hal_cfg || !driver->spec || !driver->control.pidControl)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver initialization failed");
-        return;
-    }
-    if (driver->spec->encoderPPR == 0 || driver->spec->gearRatio == 0)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Invalid encoderPPR or gearRatio");
-        return;
+        sum += driver->filter.filterBuffer[i];
     }
 
-    // 控制参数初始化
-    driver->control.mode = MOTOR_DRIVER_MODE_STOP;
+    // 更新索引
+    driver->filter.bufferIndex = (driver->filter.bufferIndex + 1) % driver->filter.windowSize;
 
-    // PID控制器初始化
-    const PID_Params defaultPid = {
-        .kp = 1.0f,
-        .ki = 0.1f,
-        .kd = 0.05f,
-        .integral_max = 100.0f,
-        .output_max = 95.0f
-    };
-    PIDController_Init(driver->control.pidControl, initialPid ? initialPid : &defaultPid);
-
-    // 状态初始化
-    memset(&driver->state, 0, sizeof(MotorDriverState));
-    driver->state.velocity.radps = 0.0f;
-    driver->state.velocity.mps = 0.0f;
-    driver->state.lastUpdate = HAL_GetTick();
-
-    /* 滤波初始化 */
-    if (driver->filter.speedFilterDepth > 0 && driver->filter.speedFilterBuf != NULL)
-    {
-        // 清零滤波缓冲区
-        memset(driver->filter.speedFilterBuf, 0, sizeof(float) * driver->filter.speedFilterDepth);
-        driver->filter.filterIndex = 0;
-    }
-    else
-    {
-        // 非法配置时禁用滤波
-        driver->filter.speedFilterDepth = 0;
-        driver->filter.speedFilterBuf = NULL;
-    }
-    // 初始化HAL层
-    HAL_Motor_Init(driver->hal_cfg);
-}
-
-void MotorDriver_SetMode(MotorDriver* driver, const MotorDriverMode mode)
-{
-    if (!driver)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
-        return;
-    }
-
-    /* 模式切换处理 */
-    if (driver->control.mode != mode)
-    {
-        /* 退出前模式清理 */
-        switch (driver->control.mode)
-        {
-            case MOTOR_DRIVER_MODE_CLOSED_LOOP:
-                PID_Reset(driver->control.pidControl); // 重置积分项和误差历史
-                break;
-            case MOTOR_DRIVER_MODE_OPEN_LOOP:
-            case MOTOR_DRIVER_MODE_STOP:
-                HAL_Motor_SetDuty(driver->hal_cfg, 0); // 释放PWM
-                break;
-        }
-        /* 进入新模式初始化 */
-        driver->control.mode = mode;
-        driver->state.errorCode = 0;
-    }
-}
-
-void MotorDriver_SetDutyCycle(MotorDriver* driver, const float dutyCycle)
-{
-    // 1. 有效性检查：确保驱动对象存在且处于开环模式
-    if (!driver || driver->control.mode != MOTOR_DRIVER_MODE_OPEN_LOOP)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is not in open loop mode");
-        return;
-    }
-
-    // 2. 占空比限幅
-    const float targetDuty = fmaxf(fminf(dutyCycle, 100.0f), -100.0f);
-
-    // 3. 计算并设置占空比（包含了方向）
-    HAL_Motor_SetDuty(driver->hal_cfg, targetDuty);
-
-    // 4. 更新状态
-    driver->state.openLoopDuty = targetDuty;
-}
-
-void MotorDriver_SetTargetRPM(MotorDriver* driver, const float rpm)
-{
-    if (!driver || driver->control.mode != MOTOR_DRIVER_MODE_CLOSED_LOOP)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is not in closed loop mode");
-        return;
-    }
-
-    // 转速限速保护(支持双向控制)
-    const float targetRPM = fmaxf(fminf(rpm, driver->spec->maxRPM), driver->spec->maxRPM * -1.0f);
-
-    // 重置积分
-    PID_Reset(driver->control.pidControl);
-    // 更新PID控制器的设定值
-    driver->control.pidControl->setpoint = rpmToRadps(targetRPM);
-
-    driver->control.targetRPM = targetRPM;
-}
-
-void MotorDriver_Update(MotorDriver* driver)
-{
-    if (!driver)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
-        return;
-    }
-
-    const uint32_t lastUpdate = driver->state.lastUpdate;
-    const uint32_t now = HAL_GetTick();
-    const float deltaTime = ((float)(now - lastUpdate)) / 1000.0f; // 转换为秒
-
-
-    if (deltaTime < 0.001f) return; // 最小时间间隔1ms
-
-    /******************** 状态更新 ********************/
-    // 1. 读取编码器脉冲总数（累计）
-    const int32_t newPulses = HAL_Motor_ReadEncoder(driver->hal_cfg);
-    const int32_t deltaPulses = newPulses - driver->state.position.totalPulses;
-
-    // 2. 计算角速度
-    const float radps = pulseToRad(deltaPulses, driver->spec->encoderPPR, driver->spec->gearRatio) / deltaTime;
-
-    // 3. 滤波处理
-    driver->state.velocity.radps = applySpeedFilter(driver, radps);
-
-    // 4. 更新状态
-    driver->state.velocity.rpm = radpsToRpm(driver->state.velocity.radps);
-    driver->state.velocity.mps = radpsToMps(driver->state.velocity.radps, driver->spec->wheelRadiusMM);
-    driver->state.position.totalPulses = newPulses;
-    driver->state.position.revolutions += pulseToRad(deltaPulses, driver->spec->encoderPPR, driver->spec->gearRatio);
-    updateRevolutions(&driver->state, deltaPulses, driver->spec->encoderPPR, driver->spec->gearRatio);
-    driver->state.lastUpdate = now;
-
-
-    /******************** 控制逻辑 ********************/
-    switch (driver->control.mode)
-    {
-        case MOTOR_DRIVER_MODE_CLOSED_LOOP:
-            {
-                // 转换目标转速为rad/s
-                const float targetRadps = rpmToRadps(driver->control.targetRPM);
-
-                // 设置 PID 控制器的目标值(关键)
-                driver->control.pidControl->setpoint = targetRadps;
-
-                // 获取当前实际角速度测量值
-                const float actualRadps = driver->state.velocity.radps;
-
-                // 执行PID计算
-                const float output = PID_Calculate(driver->control.pidControl, actualRadps, deltaTime);
-
-                // 应用输出
-                const float duty = CLAMP(output, -100.0f, 100.0f);
-                HAL_Motor_SetDuty(driver->hal_cfg, duty);
-                break;
-            }
-
-        case MOTOR_DRIVER_MODE_OPEN_LOOP:
-            /* 开环模式无需额外处理，PWM由用户直接设置 */
-            break;
-
-        case MOTOR_DRIVER_MODE_STOP:
-        default:
-            HAL_Motor_SetDuty(driver->hal_cfg, 0.0f);
-            break;
-    }
-}
-
-
-void MotorDriver_EmergencyStop(MotorDriver* driver)
-{
-    if (!driver)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
-        return;
-    }
-
-    HAL_Motor_EmergencyStop(driver->hal_cfg);
-    driver->control.mode = MOTOR_DRIVER_MODE_STOP;
-    // 重置 PID 积分项
-    PID_Reset(driver->control.pidControl);
-    driver->state.errorCode |= 0x01;
-}
-
-
-void MotorDriver_ConfigurePID(MotorDriver* driver, const PID_Params* params)
-{
-    if (!driver || !params)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver or PID params is NULL");
-        return;
-    }
-
-    // 拷贝PID参数到控制器
-    memcpy(&driver->control.pidControl->params, params, sizeof(PID_Params));
-    // 重置积分项和微分历史状态
-    PID_Reset(driver->control.pidControl);
-}
-
-MotorDriverState MotorDriver_getState(MotorDriver* driver)
-{
-    const MotorDriverState emptyState = {0};
-    if (!driver)
-    {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
-        return emptyState;
-    }
-    MotorDriverState copyState = {0};
-    memcpy(&copyState, &driver->state, sizeof(MotorDriverState));
-    return copyState;
+    return sum / (float)driver->filter.windowSize;
 }
