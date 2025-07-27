@@ -81,6 +81,14 @@ static void update_revolutions(MotorDriverState* state,
  */
 static float apply_speed_filter(MotorDriver* driver, float raw_speed);
 
+/**
+ *  计算脉冲增量
+ * @param driver  驱动控制器
+ * @param current_raw 当前原始脉冲数
+ * @return int32_t 脉冲增量
+ */
+static int32_t calculate_delta_pulses(const MotorDriver* driver, uint32_t current_raw);
+
 //------------------------------------------------------------------------------
 // 公共API实现
 //------------------------------------------------------------------------------
@@ -100,17 +108,7 @@ bool MotorDriver_Init(MotorDriver* driver, const PID_Params* initialPid)
         return false;
     }
 
-
-    // 初始化PID控制器
-    const PID_Params defaultPid = {
-        .kp = 1.0f,
-        .ki = 0.1f,
-        .kd = 0.05f,
-        .integral_max = 100.0f,
-        .output_max = 95.0f
-    };
-    PIDController_Init(&driver->control.pidCtrl, initialPid ? initialPid : &defaultPid);
-
+    PIDController_Init(&driver->control.pidCtrl, initialPid);
 
     // 初始化滤波系统
     driver->filter.windowSize   = DEFAULT_SPEED_FILTER_WINDOW;
@@ -195,7 +193,6 @@ void MotorDriver_SetTargetRPM(MotorDriver* driver, const float rpm)
     {
         return;
     }
-
     // 限制在规格范围内
     const float max_rpm       = driver->spec->maxRPM;
     driver->control.targetRPM = (rpm > max_rpm) ? max_rpm : (rpm < -max_rpm) ? -max_rpm : rpm;
@@ -208,54 +205,89 @@ void MotorDriver_Update(MotorDriver* driver)
         LOG_ERROR(LOG_MODULE_MOTOR, "Motor driver is NULL");
         return;
     }
-    // 计算时间间隔
+
+    // 更新模式
+    driver->state.mode = driver->control.mode;
+
+    // 获取时间增量（毫秒）
     const uint32_t current_tick = HAL_GetTick();
     const uint32_t last_tick    = driver->state.lastUpdateTick;
-    const float    delta_time_s = (current_tick > last_tick)
-                                   ? (float)(current_tick - last_tick) * 0.001f
-                                   : MIN_DELTA_TIME_S;
+
+    // 计算时间增量（秒）
+    float delta_time_s = 0.0f;
+    if (current_tick > last_tick)
+    {
+        delta_time_s = (float)(current_tick - last_tick) * 0.001f;
+    }
+
     // 更新时间太短则跳过
     if (delta_time_s < MIN_DELTA_TIME_S)
     {
         return;
     }
 
-    // 更新编码器状态
-    const int32_t current_pulses = HAL_Motor_ReadEncoder(driver->halCfg);
-    const int32_t delta_pulses   = current_pulses - driver->state.position.totalPulses;
+    // 获取当前编码器脉冲值
+    const uint32_t current_raw = HAL_Motor_ReadRawEncoder(driver->halCfg);
 
-    // 计算角速度 (rad/s): 实现了从脉冲增量到角速度的转换
-    // 每个脉冲对应的弧度值
-    const float rad_per_pulse = pulses_to_rad(1, driver->spec->encoderPPR, driver->spec->gearRatio);
-    // 角速度（弧度/秒） = (脉冲增量 * 每个脉冲的弧度值) / 时间间隔
-    const float raw_radps = ((float)delta_pulses * rad_per_pulse) / delta_time_s;
+    // 计算脉冲增量（处理计数器溢出）
+    const int32_t delta_pulses = calculate_delta_pulses(driver, current_raw);
 
-    // 应用滤波
-    driver->state.velocity.radps = apply_speed_filter(driver, raw_radps);
+    // 更新原始值存储
+    driver->state.position.lastRawPulses = current_raw;
 
-    // 更新其他速度单位
-    driver->state.velocity.rpm = radps_to_rpm(driver->state.velocity.radps);
-    driver->state.velocity.mps = radps_to_mps(driver->state.velocity.radps, driver->spec->wheelRadiusMM);
+    // 计算实际脉冲率（脉冲/秒）
+    float pulses_per_sec = (float)delta_pulses / delta_time_s;
 
-    // 更新位置信息
-    driver->state.position.totalPulses = current_pulses;
+    // 更新位置信息（必须在速度计算后）
+    driver->state.position.totalPulses += delta_pulses;
     update_revolutions(&driver->state, delta_pulses, driver->spec->encoderPPR, driver->spec->gearRatio);
+
+    // 计算实际转速（RPM）计算公式: RPM = (脉冲率 × 60) / (PPR × 减速比)
+    const float actual_rpm = (pulses_per_sec * 60.0f) /
+                             ((float)driver->spec->encoderPPR * (float)driver->spec->gearRatio);
+
+    // 更新速度状态
+    driver->state.velocity.rpm   = actual_rpm;
+    driver->state.velocity.radps = rpm_to_radps(actual_rpm);
+    driver->state.velocity.mps   = radps_to_mps(driver->state.velocity.radps, driver->spec->wheelRadiusMM);
 
     // 更新时间戳
     driver->state.lastUpdateTick = current_tick;
 
+
     // 闭环控制处理
     if (driver->state.mode == MOTOR_DRIVER_MODE_CLOSED_LOOP)
     {
-        // 将目标RPM转换为rad/s
-        const float target_radps = rpm_to_radps(driver->control.targetRPM);
+        // 计算最大脉冲率（用于标准化）
+        const float max_pulses_rate = (driver->spec->maxRPM *
+                                       (float)driver->spec->encoderPPR *
+                                       (float)driver->spec->gearRatio) / 60.0f;
+
+        // 计算目标脉冲率（脉冲/秒）
+        const float target_pulses_per_sec = (driver->control.targetRPM *
+                                             (float)driver->spec->gearRatio *
+                                             (float)driver->spec->encoderPPR) / 60.0f;
+
+        // 标准化输入（-1到1范围）
+        const float normalized_target = target_pulses_per_sec / max_pulses_rate;
+        const float normalized_actual = pulses_per_sec / max_pulses_rate;
 
         // 执行PID计算
-        const float output = PID_Calculate(&driver->control.pidCtrl, target_radps, delta_time_s);
+        const float output = PID_Calculate(&driver->control.pidCtrl, normalized_target,
+                                           normalized_actual, delta_time_s);
 
         // 应用输出
-        const float clamped_output = (output > 100.0f) ? 100.0f : (output < -100.0f) ? -100.0f : output;
-        HAL_Motor_SetDuty(driver->halCfg, clamped_output);
+        const float clamped_output = (output > 1.0f) ? 1.0f : (output < -1.0f) ? -1.0f : output;
+
+        HAL_Motor_SetDuty(driver->halCfg, clamped_output * 100.0f);
+
+        // PID debug
+        static uint32_t last_print = 0;
+        if (HAL_GetTick() - last_print >= 20) { // 50Hz采样率
+            last_print = HAL_GetTick();
+            // 格式：目标值,实际值,输出值\n
+            LOG_INFO(LOG_MODULE_SYSTEM, "%.2f,%.2f,%.2f\n",normalized_target,normalized_actual, clamped_output);
+        }
     }
 }
 
@@ -297,7 +329,6 @@ void MotorDriver_ConfigurePID(MotorDriver* driver, const PID_Params* params)
     // 重置积分项和微分历史状态
     PID_Reset(&driver->control.pidCtrl);
 }
-
 
 //------------------------------------------------------------------------------
 // 静态函数实现
@@ -422,4 +453,24 @@ static float apply_speed_filter(MotorDriver* driver, float raw_speed)
     driver->filter.bufferIndex = (driver->filter.bufferIndex + 1) % driver->filter.windowSize;
 
     return sum / (float)driver->filter.windowSize;
+}
+
+//  计算脉冲增量
+int32_t calculate_delta_pulses(const MotorDriver* driver, const uint32_t current_raw)
+{
+    const uint32_t last_raw = driver->state.position.lastRawPulses;
+    const uint32_t maxValue = HAL_Motor_GetEncoderMaxValue(driver->halCfg);
+    const uint32_t halfMax  = maxValue / 2;
+
+    int32_t delta = (int32_t)current_raw - (int32_t)last_raw;
+
+    if (delta > halfMax)
+    {
+        delta -= (int32_t)(maxValue + 1);
+    }
+    else if (delta < -(int32_t)halfMax)
+    {
+        delta += (int32_t)(maxValue + 1);
+    }
+    return delta;
 }

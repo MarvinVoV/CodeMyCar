@@ -62,8 +62,8 @@ class MixedParams(BaseModel):
 class MotionCommand(BaseModel):
     """运动控制指令 (简化命名)"""
     mode: MotionMode
-    params: Union[DifferentialParams, DirectParams, AckermannParams, MixedParams] = None
     duration: int = Field(..., ge=0, le=65535, description="持续时间 (ms)")
+    params: Union[DifferentialParams, DirectParams, AckermannParams, MixedParams] = None
 
     @model_validator(mode='after')
     def check_params(self):

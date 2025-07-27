@@ -127,16 +127,6 @@ int MotionService_SetControlMode(MotionContext* ctx, MotionMode new_mode)
         return ERR_MOTION_MODE_MISMATCH;
     }
 
-    // 模式转换表
-    static const uint8_t mode_transitions[MOTION_MODE_MAX][MOTION_MODE_MAX] = {
-        // EMERGENCY, DIRECT, DIFFERENTIAL, STEER_PARALLEL, SPIN, MIXED
-        {1, 0, 0, 0, 0, 0}, // EMERGENCY
-        {1, 1, 0, 0, 0, 0}, // DIRECT
-        {1, 0, 1, 1, 1, 1}, // DIFFERENTIAL
-        {1, 0, 1, 1, 0, 1}, // STEER_PARALLEL
-        {1, 0, 1, 0, 1, 0}, // SPIN_IN_PLACE
-        {1, 0, 1, 1, 0, 1}  // MIXED_STEER
-    };
 
     // 获取互斥锁
     if (osMutexAcquire(ctx->targetMutex, MUTEX_TIMEOUT_MS) != osOK)
@@ -146,12 +136,6 @@ int MotionService_SetControlMode(MotionContext* ctx, MotionMode new_mode)
     }
 
     const MotionMode current_mode = ctx->motionTarget.mode;
-    // 检查模式转换合法性
-    if (!mode_transitions[current_mode][new_mode])
-    {
-        osMutexRelease(ctx->targetMutex);
-        return ERR_MOTION_MODE_TRANSITION;
-    }
 
     // 特殊条件检查（如急停未解除）
     if (current_mode == MOTION_EMERGENCY_STOP && new_mode != MOTION_EMERGENCY_STOP)
@@ -698,9 +682,6 @@ static void handle_spin_in_place(MotionContext* ctx, const MotionTarget* target)
 static void handle_mixed_steering(MotionContext* ctx, const MotionTarget* target)
 {
     const ChassisConfig* cfg            = &ctx->chassisConfig;
-    const float          track_width_m  = mm_to_m(cfg->trackWidthMM);
-    const float          wheel_radius_m = mm_to_m(cfg->wheelRadiusMM);
-
 
     // 处理驱动控制
     switch (target->params.mixedCtrl.driveCtrlType)

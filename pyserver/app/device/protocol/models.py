@@ -77,13 +77,13 @@ class MotionProtocolCommand:
     def __init__(
             self,
             mode: MotionProtocolMode,
+            duration: int = 0,
             params: Union[
                 DiffCtrlProtocolParam,
                 DirectCtrlProtocolParam,
                 AckermannProtocolParam,
                 MixedSteerProtocolParam
             ] = None,
-            duration: int = 0
     ):
         self.mode = mode
         self.params = params
@@ -92,9 +92,9 @@ class MotionProtocolCommand:
     def to_bytes(self) -> bytes:
         """转换为设备协议字节流"""
         mode_byte = struct.pack('<B', self.mode.value)
-        params_bytes = self.params.to_bytes() if self.params else b'\x00' * 7
         duration_bytes = struct.pack('<H', self.duration)
-        return mode_byte + params_bytes + duration_bytes
+        params_bytes = self.params.to_bytes() if self.params else b'\x00' * 7
+        return mode_byte + duration_bytes + params_bytes
 
 
 class ControlProtocolCommand:

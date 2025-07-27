@@ -33,22 +33,6 @@ static inline float clamp_duty(const float value)
 }
 
 /**
- * @brief 获取编码器最大计数值
- *
- * @param tim 编码器定时器句柄
- * @return uint32_t 最大计数值
- */
-static uint32_t get_encoder_max_value(TIM_HandleTypeDef* tim)
-{
-    if (tim->Instance->ARR == 0)
-    {
-        // 自动重装载寄存器未设置，使用默认值
-        return (tim->Init.Period > 0) ? tim->Init.Period : ENCODER_16BIT_MAX;
-    }
-    return tim->Instance->ARR;
-}
-
-/**
  * 相关配置已经通过 CubeMX 完成配置，这里只需要实现启动逻辑即可
  */
 HAL_StatusTypeDef HAL_Motor_Init(HAL_MotorConfig* config)
@@ -92,6 +76,8 @@ HAL_StatusTypeDef HAL_Motor_Init(HAL_MotorConfig* config)
     // 初始化状态结构体
     memset(&config->state, 0, sizeof(HAL_MotorState));
     config->state.direction = MOTOR_COAST_STOP;
+
+    return HAL_OK;
 }
 
 void HAL_Motor_SetDirection(HAL_MotorConfig* config, const MotorDirection direction)
@@ -219,22 +205,39 @@ int32_t HAL_Motor_ReadEncoder(HAL_MotorConfig* config)
     const uint32_t currentTicks = __HAL_TIM_GET_COUNTER(config->encoder.tim);
 
     // 获取编码器最大计数值
-    const uint32_t maxValue = get_encoder_max_value(config->encoder.tim);
+    const uint32_t maxValue = HAL_Motor_GetEncoderMaxValue(config);
+
+    const uint32_t halfMax = maxValue / 2;
 
     // 计算增量（处理溢出）
-    int32_t delta = 0;
-    const uint32_t lastTicks = config->state.encoderTicks & maxValue;
+    const uint32_t lastRawTicks = config->state.encoderTicks & maxValue;
+    int32_t        delta        = (int32_t)currentTicks - (int32_t)lastRawTicks;
 
-    if (currentTicks >= lastTicks) {
-        delta = (int32_t)(currentTicks - lastTicks);
-    } else {
-        // 下溢情况
-        delta = (int32_t)((maxValue - lastTicks) + currentTicks + 1);
+    // 处理计数器溢出（双向）
+    if (delta > halfMax)
+    {
+        // 正向溢出修正：实际是反向大位移
+        delta -= (int32_t)(maxValue + 1);
+    }
+    else if (delta < -(int32_t)halfMax)
+    {
+        // 反向溢出修正：实际是正向大位移
+        delta += (int32_t)(maxValue + 1);
     }
 
     // 更新累计值
     config->state.encoderTicks += delta;
     return config->state.encoderTicks;
+}
+
+uint32_t HAL_Motor_ReadRawEncoder(HAL_MotorConfig* config)
+{
+    if (config == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_MOTOR, "HAL MotorConfig is NULL");
+        return 0;
+    }
+    return __HAL_TIM_GET_COUNTER(config->encoder.tim);
 }
 
 HAL_MotorState HAL_Motor_GetStatus(const HAL_MotorConfig* config)
@@ -245,4 +248,15 @@ HAL_MotorState HAL_Motor_GetStatus(const HAL_MotorConfig* config)
         return (HAL_MotorState){0};
     }
     return config->state; // 返回状态结构体副本 (值返回机制：结构体值拷贝而非指针)
+}
+
+uint32_t HAL_Motor_GetEncoderMaxValue(const HAL_MotorConfig* config)
+{
+    const TIM_HandleTypeDef* tim = config->encoder.tim;
+    if (tim->Instance->ARR == 0)
+    {
+        // 自动重装载寄存器未设置，使用默认值
+        return (tim->Init.Period > 0) ? tim->Init.Period : ENCODER_16BIT_MAX;
+    }
+    return tim->Instance->ARR;
 }

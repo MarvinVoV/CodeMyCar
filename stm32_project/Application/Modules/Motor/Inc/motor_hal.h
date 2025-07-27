@@ -123,6 +123,13 @@ void HAL_Motor_EmergencyStop(HAL_MotorConfig* config);
 int32_t HAL_Motor_ReadEncoder(HAL_MotorConfig* config);
 
 /**
+ * @brief 读取编码器原始脉冲值
+ * @param config   电机配置结构体指针
+ * @return uint32_t 编码器原始脉冲数
+ */
+uint32_t HAL_Motor_ReadRawEncoder(HAL_MotorConfig* config);
+
+/**
  * @brief 获取电机当前状态
  *
  * @param[in] config 电机配置结构体指针
@@ -131,5 +138,14 @@ int32_t HAL_Motor_ReadEncoder(HAL_MotorConfig* config);
  * @warning 返回的是状态副本，非实时状态指针
  */
 HAL_MotorState HAL_Motor_GetStatus(const HAL_MotorConfig* config);
+
+
+/**
+ * @brief 获取编码器最大值
+ *
+ * @param[in] config 电机配置结构体指针
+ * @return uint32_t 编码器最大值
+ */
+uint32_t HAL_Motor_GetEncoderMaxValue(const HAL_MotorConfig* config);
 
 #endif /* MODULES_MOTOR_INC_MOTOR_HAL_H_ */

@@ -54,8 +54,9 @@ typedef struct
 
     struct
     {
-        int32_t totalPulses; ///< 累计脉冲数
-        float   revolutions; ///< 累计转数
+        int32_t  totalPulses;   ///< 累计脉冲数
+        float    revolutions;   ///< 累计转数
+        uint32_t lastRawPulses; ///< 上次原始脉冲值
     } position;
 
     float           openLoopDuty;   ///< 当前开环占空比 [%]

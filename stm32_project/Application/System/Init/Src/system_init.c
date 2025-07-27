@@ -22,11 +22,9 @@ static const ChassisConfig DEFAULT_CHASSIS_CFG = {
     .maxSteerAngleDeg = 45.0f     // 前轮最大转向角度，单位：度(degree) 正值右转，负值左转
 };
 
-// 舵机参数
-#define SERVO_MIN_PULSE  500   // 最小脉冲宽度 (us)
-#define SERVO_MAX_PULSE  2500  // 最大脉冲宽度 (us)
-#define SERVO_ANGLE_MIN  0.0f  // 最小角度 (度)
-#define SERVO_ANGLE_MAX  180.0f // 最大角度 (度)
+// // 舵机参数
+// #define SERVO_ANGLE_MIN  0.0f  // 最小角度 (度)
+// #define SERVO_ANGLE_MAX  180.0f // 最大角度 (度)
 
 
 // 系统上下文
@@ -94,11 +92,15 @@ static int init_motor_service(void)
     // PID参数
     pidController = (PID_Controller){
         .params = {
-            .kp = 1.0f,
-            .ki = 0.1f,
-            .kd = 0.05f,
-            .integral_max = 100.0f,
-            .output_max = 95.0f
+            .kp = 3.5f,                       // 提高比例增益（增强启动能力）
+            .ki = 0.4f,                       // 提高积分增益（加速误差消除）
+            .kd = 0.05f,                      // 降低微分增益（减少噪声影响）
+            .integral_max = 1.5f,             // 积分限幅，归一化后范围（1.5倍输出限幅）
+            .output_max = 1.0f,               // 输出限幅（100%占空比）
+            .anti_windup = true,              // 启用抗饱和
+            .integral_threshold = 0.1f,       // 积分激活阈值 归一化阈值（原值的1/500）
+            .dead_zone = 0.05f,               // 死区
+            .setpoint_change_threshold = 0.2f // 归一化阈值
         }
     };
 

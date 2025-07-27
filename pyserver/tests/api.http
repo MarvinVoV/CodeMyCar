@@ -15,11 +15,11 @@ Content-Type: application/json
   "ctrl_id": "1",
   "motion": {
     "mode": 1,
+    "duration": 10,
     "params": {
       "left_rpm": 0,
       "right_rpm": 0,
       "steer_angle": 900
-    },
-    "duration": 10
+    }
   }
 }

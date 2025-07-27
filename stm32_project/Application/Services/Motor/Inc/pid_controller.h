@@ -9,118 +9,74 @@
 #define SERVICES_MOTOR_INC_PID_CONTROLLER_H_
 #ifndef CLAMP
 #define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
+#include <stdbool.h>
 #endif
 
-typedef struct
-{
-    float kp;           // 比例系数（建议范围：0.1-10.0）
-    float ki;           // 积分系数（建议范围：0.01-2.0）
-    float kd;           // 微分系数（建议范围：0.0-1.0）
-    float integral_max; // 积分限幅（防饱和，建议为output_max的1.2-2倍）
-    float output_max;   // 输出限幅（绝对值不超过该值）
-} PID_Params;
+#define ZERO_TARGET_THRESHOLD  (0.1f)
 
 /**
- * PID控制器结构体
- *
- * 用于实现比例-积分-微分控制算法，通过对系统误差进行比例、积分、微分运算
- * 计算出控制输出量，适用于需要闭环控制的场景（如电机速度控制、温度控制等）
+ * @brief PID控制器参数结构
  */
 typedef struct
 {
-    /**
-     * 目标设定值
-     *
-     * 表示控制系统期望达到的目标值，单位与测量值一致
-     * 示例：当控制电机转速时，设置为1000表示目标转速为1000 RPM
-     */
-    float setpoint;
+    float kp;                        ///< 比例系数（建议范围：0.1-10.0）
+    float ki;                        ///< 积分系数（建议范围：0.01-2.0）
+    float kd;                        ///< 微分系数（建议范围：0.0-1.0）
+    float integral_max;              ///< 积分限幅（防饱和，建议为output_max的1.2-2倍）
+    float output_max;                ///< 输出限幅（绝对值不超过该值）
+    bool  anti_windup;               ///< 抗饱和使能 (true=启用, false=禁用)
+    float integral_threshold;        ///< 积分激活阈值（误差小于此值时积分）
+    float dead_zone;                 ///< 死区阈值（误差小于此值时输出为0）
+    float setpoint_change_threshold; ///< 设定点变化阈值（单位：rad/s）
+} PID_Params;
 
-    /**
-     * 积分项累积值
-     *
-     * 用于存储误差的积分值，主要作用：
-     * 1. 消除系统稳态误差
-     * 2. 提高系统对持续偏差的响应能力
-     *
-     * 注意：实际使用中需要设置积分限幅(params.integral_limit)防止积分饱和
-     */
-    float integral;
+/**
+ * @brief PID控制器状态结构
+ */
+typedef struct
+{
+    float setpoint;         ///< 当前目标值
+    float integral;         ///< 积分项累积值
+    float prev_measurement; ///< 前次测量值（用于微分计算）
+    float output;           ///< 上一次输出值
+} PID_State;
 
-    /**
-     * 前次误差值
-     *
-     * 存储上一次控制周期的误差值（setpoint - measurement），用于：
-     * 1. 计算微分项的误差变化率
-     * 2. 实现微分先行（避免设定值突变导致的微分冲击）
-     *
-     * 初始化时应设为0，重置控制器时需要清除此值
-     */
-    float prev_error;
-
-    /**
-     * PID控制参数
-     *
-     * 包含控制器调节参数：
-     * - kp: 比例系数，决定系统响应速度
-     * - ki: 积分系数，消除稳态误差
-     * - kd: 微分系数，抑制超调/振荡
-     * - integral_limit: 积分限幅，防止积分项过大
-     * - output_limit: 输出限幅，确保控制量在合理范围
-     *
-     * 建议通过Ziegler-Nichols方法等调参方法进行参数整定
-     */
-    PID_Params params;
+/**
+ * @brief PID控制器主结构
+ */
+typedef struct
+{
+    PID_Params params; ///< PID参数
+    PID_State  state;  ///< PID状态
 } PID_Controller;
 
 /**
  * @brief 初始化PID控制器
- * @param pid 要初始化的PID控制器指针，必须指向有效内存
- * @param params PID参数指针，必须指向有效参数结构体
- *
- * @details
- * - 执行控制器内部状态重置（积分项清零，前次误差归零）
- * - 复制参数结构体内容到控制器实例
- * - 典型调用场景：控制器首次使用前或参数修改后
- *
- * @warning
- * - 参数指针必须有效，否则会导致未定义行为
- * - 初始化后建议设置合理的setpoint值
+ * @param pid PID控制器实例指针
+ * @param params PID参数指针
  */
 void PIDController_Init(PID_Controller* pid, const PID_Params* params);
+
 /**
  * @brief 设置PID控制器参数
  * @param pid PID控制器实例指针
  * @param params 新的参数值
  */
 void PID_SetParameters(PID_Controller* pid, const PID_Params* params);
+
 /**
  * @brief 执行PID计算
  * @param pid PID控制器实例指针
+ * @param setpoint 目标设定值
  * @param measurement 当前测量值
  * @param delta_time 距离上次计算的时间间隔（秒）
  * @return 计算得到的控制输出值
  */
-float PID_Calculate(PID_Controller* pid, float measurement, float delta_time);
+float PID_Calculate(PID_Controller* pid, float setpoint, float measurement, float delta_time);
 
 /**
  * @brief 重置控制器内部状态
  * @param pid 要重置的PID控制器指针
- *
- * @details
- * - 清零积分项（integral = 0）
- * - 重置前次误差（prev_error = 0）
- * - 保持参数设置(setpoint和params)不变
- *
- * @warning
- * - 必须在控制器停止工作时调用（如急停后/模式切换时）
- * - 误用会导致控制不连续，可能引发系统不稳定
- *
- * @example
- * // 当系统从手动模式切换到自动控制时
- * PIDController_Reset(&pid);
- * pid.setpoint = target_value;  // 设置新目标值
- * enable_control();             // 启用控制器
  */
 void PID_Reset(PID_Controller* pid);
 

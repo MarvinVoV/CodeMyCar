@@ -63,8 +63,8 @@ class DeviceService:
             # 构建运动指令和控制协议对象
             motion_cmd = MotionProtocolCommand(
                 mode=motion_mode,
-                params=params,
-                duration=command.motion.duration
+                duration=command.motion.duration,
+                params=params
             )
             control_cmd = ControlProtocolCommand()
             control_cmd.add_motion(motion_cmd)

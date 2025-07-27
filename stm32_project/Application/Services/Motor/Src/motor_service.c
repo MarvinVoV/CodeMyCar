@@ -76,13 +76,13 @@ int MotorService_init(MotorService* service, MotorDriver* leftDriver, MotorDrive
     }
 
     // 初始化电机驱动
-    if (MotorDriver_Init(leftDriver, NULL) != true)
+    if (MotorDriver_Init(leftDriver, &leftDriver->control.pidCtrl.params) != true)
     {
         LOG_ERROR(LOG_MODULE_MOTOR, "Left motor driver init failed");
         return ERR_MOTOR_DRIVER_INIT_FAIL;
     }
 
-    if (MotorDriver_Init(rightDriver, NULL) != true)
+    if (MotorDriver_Init(rightDriver, &rightDriver->control.pidCtrl.params) != true)
     {
         LOG_ERROR(LOG_MODULE_MOTOR, "Right motor driver init failed");
         return ERR_MOTOR_DRIVER_INIT_FAIL;
