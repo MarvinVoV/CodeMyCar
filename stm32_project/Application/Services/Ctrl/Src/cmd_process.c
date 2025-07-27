@@ -176,9 +176,13 @@ static int process_motion_command(CmdProcessorContext* ctx, const MotionCmd* mot
                 else
                 {
                     // 占空比控制模式
-                    const float left_duty = decode_duty_cycle(mixed->driveParams.dutyCycleCtrl.leftDutyCycle);
+                    const float left_duty  = decode_duty_cycle(mixed->driveParams.dutyCycleCtrl.leftDutyCycle);
                     const float right_duty = decode_duty_cycle(mixed->driveParams.dutyCycleCtrl.rightDutyCycle);
-                    ret = MotionService_SetMixedDutyParams(ctx->motionContext, left_duty, right_duty, steer, gain);
+                    // 转换为占空比系数 (-1.0 ~ 1.0)
+                    const float left_duty_factor = left_duty / 100.0f;
+                    const float right_duty_factor = right_duty / 100.0f;
+                    ret = MotionService_SetMixedDutyParams(ctx->motionContext, left_duty_factor, right_duty_factor,
+                                                           steer, gain);
                 }
             }
             break;
@@ -206,21 +210,51 @@ static int process_motion_command(CmdProcessorContext* ctx, const MotionCmd* mot
     return ERR_SUCCESS;
 }
 
+/**
+ * @brief 解码线速度参数
+ *
+ * @param value 原始值 (0.001 m/s步长)
+ * @return float 实际线速度 (m/s)
+ */
 static float decode_linear_vel(const int16_t value)
 {
     return (float)value * 0.001f; // 0.001 m/s分辨率
 }
 
+/**
+ * @brief 解码转向角参数
+ *
+ * @param deg 原始转向角值 (0.1度步长)
+ * @return float 实际转向角 (度)
+ *
+ * @details 将接收到的整型转向角参数转换为浮点型角度值。
+ *          输入值以0.1度为步长，即值10表示1.0度，100表示10.0度。
+ */
 static float decode_steer_angle(const int16_t deg)
 {
     return (float)deg * 0.1f; // 0.1度分辨率
 }
 
+/**
+ * @brief 解码角速度参数
+ *
+ * @param angular_vel 原始值 (0.0644 rad/s步长)
+ * @return float 实际角速度 (rad/s)
+ */
 static float decode_angular_vel(const int16_t angular_vel)
 {
     return (float)angular_vel * 0.0644f; // 0.0644 rad/s分辨率
 }
 
+/**
+ * @brief 解码占空比参数
+ *
+ * @param duty 原始占空比值 (0.1%步长，范围-1000~1000)
+ * @return float 实际占空比百分比 (-100.0% ~ 100.0%)
+ *
+ * @details 将接收到的整型占空比参数转换为浮点型百分比值。
+ *          输入值以0.1%为步长，即值-1000表示-100.0%，1000表示100.0%。
+ */
 static float decode_duty_cycle(const int16_t duty)
 {
     // 转换为百分比 (-100.0% ~ 100.0%)

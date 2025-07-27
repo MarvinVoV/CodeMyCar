@@ -11,32 +11,31 @@
 #include "cmd_process.h"
 #include "motion_service.h"
 
-// 舵机 PWM TIM
-extern TIM_HandleTypeDef htim2;
-// 电机 PWM TIM
-extern TIM_HandleTypeDef htim3;
-// 左轮电机编码器 TIM
-extern TIM_HandleTypeDef htim4;
-// 右轮电机编码器 TIM
-extern TIM_HandleTypeDef htim5;
+// 外设句柄声明
+extern TIM_HandleTypeDef htim2; // 舵机 PWM TIM
+extern TIM_HandleTypeDef htim3; // 电机 PWM TIM
+extern TIM_HandleTypeDef htim4; // 左轮电机编码器 TIM
+extern TIM_HandleTypeDef htim5; // 右轮电机编码器 TIM
 
 /*--------------------- 系统上下文 ---------------------*/
 typedef struct
 {
-    MotorService* motorService;
-    SteerInstance* steerInstance;
-    MotionContext* motionContext;
+    MotorService*        motorService;
+    SteerInstance*       steerInstance;
+    MotionContext*       motionContext;
     CmdProcessorContext* cmdContext;
 } SystemContext;
 
 /**
  * @brief 系统全局初始化
- * @return 初始化状态 0=成功，其他=错误码
+ * @return 初始化状态 ERR_SUCCESS=成功，其他=错误码
  */
 int System_Initialize();
 
+
 /**
  * @brief 获取系统上下文
+ * @return 系统上下文指针
  */
 SystemContext* System_GetContext(void);
 

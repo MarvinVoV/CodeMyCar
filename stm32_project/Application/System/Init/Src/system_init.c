@@ -5,26 +5,8 @@
  *      Author: marvin
  */
 #include "system_init.h"
-
 #include "error_code.h"
 
-static SystemContext sysCtx;
-
-static MotorSpec motorSpec;
-static HAL_MotorConfig motorLeftHalConfig;
-static HAL_MotorConfig motorRightHalConfig;
-static PID_Controller motorPicController;
-static MotorDriver motorLeftDriver;
-static MotorDriver motorRightDriver;
-static MotorService motorService;
-
-static HAL_ServoConfig servoHalConfig;
-static ServoDriver servoDriver;
-static SteerConfig steerConfig;
-static SteerInstance steerInstance;
-
-static MotionContext motionContext;
-static CmdProcessorContext commandContext;
 
 /**
  * @brief 底盘默认物理参数配置
@@ -40,48 +22,77 @@ static const ChassisConfig DEFAULT_CHASSIS_CFG = {
     .maxSteerAngleDeg = 45.0f     // 前轮最大转向角度，单位：度(degree) 正值右转，负值左转
 };
 
-int System_Initialize()
+// 舵机参数
+#define SERVO_MIN_PULSE  500   // 最小脉冲宽度 (us)
+#define SERVO_MAX_PULSE  2500  // 最大脉冲宽度 (us)
+#define SERVO_ANGLE_MIN  0.0f  // 最小角度 (度)
+#define SERVO_ANGLE_MAX  180.0f // 最大角度 (度)
+
+
+// 系统上下文
+static SystemContext sysCtx;
+
+// 模块实例
+static MotorService        motorService;
+static SteerInstance       steerInstance;
+static MotionContext       motionContext;
+static CmdProcessorContext commandContext;
+
+// 驱动实例
+static MotorDriver motorLeftDriver;
+static MotorDriver motorRightDriver;
+static ServoDriver servoDriver;
+
+// 全局静态变量
+static HAL_MotorConfig leftHalCfg;
+static HAL_MotorConfig rightHalCfg;
+static MotorSpec       motorSpec;
+static PID_Controller  pidController;
+
+// 初始化状态
+static bool isInitialized = false;
+
+
+/**
+ * @brief 初始化电机服务
+ *
+ * @note 依赖：必须在舵机初始化前调用
+ * @note 依赖：必须在定时器初始化完成后调用
+ *
+ * @return 错误码
+ */
+static int init_motor_service(void)
 {
-    motorLeftHalConfig = (HAL_MotorConfig){
-        .pwm = {
-            .tim = &htim3,
-            .ch = TIM_CHANNEL_1
-        },
-        .encoder = {
-            &htim4
-        },
+    // 左轮电机配置
+    leftHalCfg = (HAL_MotorConfig){
+        .pwm = {.tim = &htim3, .ch = TIM_CHANNEL_1},
+        .encoder = {&htim4},
         .gpio = {
-            .in1Port = GPIOF,
-            .in1Pin = GPIO_PIN_7, //  IN1控制引脚GPIO端口 - 通常用于电机正转控制
-            .in2Port = GPIOF,
-            .in2Pin = GPIO_PIN_8 //  IN2控制引脚GPIO端口 - 通常用于电机反转控制
+            .in1Port = GPIOF, .in1Pin = GPIO_PIN_7,
+            .in2Port = GPIOF, .in2Pin = GPIO_PIN_8
         }
     };
 
-    motorRightHalConfig = (HAL_MotorConfig){
-        .pwm = {
-            .tim = &htim3,
-            .ch = TIM_CHANNEL_2
-        },
-        .encoder = {
-            &htim5
-        },
+    // 右轮电机配置
+    rightHalCfg = (HAL_MotorConfig){
+        .pwm = {.tim = &htim3, .ch = TIM_CHANNEL_2},
+        .encoder = {&htim5},
         .gpio = {
-            .in1Port = GPIOF,
-            .in1Pin = GPIO_PIN_6, //  IN1控制引脚GPIO端口 - 通常用于电机正转控制
-            .in2Port = GPIOF,
-            .in2Pin = GPIO_PIN_10 //  IN2控制引脚GPIO端口 - 通常用于电机反转控制
+            .in1Port = GPIOF, .in1Pin = GPIO_PIN_6,
+            .in2Port = GPIOF, .in2Pin = GPIO_PIN_10
         }
     };
 
+    // 电机规格参数
     motorSpec = (MotorSpec){
         .encoderPPR = 13,
         .gearRatio = 30,
         .maxRPM = 400,
-        .wheelRadiusMM = DEFAULT_CHASSIS_CFG.wheelbaseMM
+        .wheelRadiusMM = DEFAULT_CHASSIS_CFG.wheelRadiusMM
     };
 
-    motorPicController = (PID_Controller){
+    // PID参数
+    pidController = (PID_Controller){
         .params = {
             .kp = 1.0f,
             .ki = 0.1f,
@@ -92,21 +103,21 @@ int System_Initialize()
     };
 
     motorLeftDriver = (MotorDriver){
-        .halCfg = &motorLeftHalConfig,
+        .halCfg = &leftHalCfg,
         .spec = &motorSpec,
         .control = {
             .mode = MOTOR_DRIVER_MODE_STOP,
-            .pidCtrl = motorPicController,
+            .pidCtrl = pidController,
             .targetRPM = 0.0f,
         }
     };
 
     motorRightDriver = (MotorDriver){
-        .halCfg = &motorRightHalConfig,
+        .halCfg = &rightHalCfg,
         .spec = &motorSpec,
         .control = {
             .mode = MOTOR_DRIVER_MODE_STOP,
-            .pidCtrl = motorPicController,
+            .pidCtrl = pidController,
             .targetRPM = 0.0f,
         }
     };
@@ -121,18 +132,33 @@ int System_Initialize()
             }
         }
     };
+    return MotorService_init(&motorService, &motorLeftDriver, &motorRightDriver);
+}
 
-    // 初始化电机服务
-    if (MotorService_init(&motorService, &motorLeftDriver, &motorRightDriver) != ERR_SUCCESS)
-    {
-        return ERR_HW_INIT_FAIL;
-    }
-
-    servoHalConfig = (HAL_ServoConfig){
+/**
+ * @brief 初始化转向服务
+ *
+ * @note 依赖：必须在舵机PWM定时器初始化完成后调用
+ * @note 依赖：必须在电机服务初始化后调用（无技术依赖，但建议顺序）
+ *
+ * @return 错误码
+ */
+static int init_steer_servo_service(void)
+{
+    static HAL_ServoConfig servoHalConfig = (HAL_ServoConfig){
         .pwmTim = &htim2,
         .channel = TIM_CHANNEL_1,
         .maxPulse = SERVO_MAX_PULSE,
         .minPulse = SERVO_MIN_PULSE
+    };
+
+    static SteerConfig steerConfig = (SteerConfig){
+        .minAngleDeg = SERVO_ANGLE_MIN,
+        .maxAngleDeg = SERVO_ANGLE_MAX,
+        .deadZoneDeg = 2,
+        .updateIntervalMs = 20,
+        .maxSpeedDegPerSec = 90.0f,      // 最大速度：90°/秒（即 0.025°/ms）
+        .accelerationDegPerSec2 = 180.0f // 加速度：180°/秒²（即 0.18°/ms²）
     };
 
     servoDriver = (ServoDriver){
@@ -146,54 +172,106 @@ int System_Initialize()
         }
     };
 
-    steerConfig = (SteerConfig){
-        .minAngleDeg = 0,
-        .maxAngleDeg = 180,
-        .deadZoneDeg = 2,
-        .updateIntervalMs = 20,
-        .maxSpeedDegPerSec = 90.0f,      // 最大速度：90°/秒（即 0.025°/ms）
-        .accelerationDegPerSec2 = 180.0f // 加速度：180°/秒²（即 0.18°/ms²）
-    };
-
     steerInstance = (SteerInstance){
         .driver = &servoDriver
     };
 
-
-    // 初始化转向服务
-    if (SteerService_init(&steerInstance, &steerConfig, &servoDriver) != ERR_SUCCESS)
-    {
-        return ERR_HW_INIT_FAIL;
-    }
+    return SteerService_init(&steerInstance, &steerConfig, &servoDriver);
+}
 
 
-    // 初始化运动控制
+/**
+ * @brief 初始化运动控制上下文
+ *
+ * @note 依赖：必须在电机服务和转向服务初始化完成后调用
+ *
+ * @return 错误码
+ */
+static int init_motion_context(void)
+{
     motionContext = (MotionContext){
         .chassisConfig = DEFAULT_CHASSIS_CFG,
         .motorService = &motorService,
         .steerServo = &steerInstance
     };
-    if (MotionContext_Init(&motionContext, &motorService, &steerInstance, &DEFAULT_CHASSIS_CFG) != ERR_SUCCESS)
-    {
-        return ERR_HW_INIT_FAIL;
-    }
+    return MotionContext_Init(&motionContext, &motorService, &steerInstance, &DEFAULT_CHASSIS_CFG);
+}
 
+/**
+ * @brief 初始化命令处理器
+ *
+ * @note 依赖：必须在运动控制上下文初始化完成后调用
+ *
+ * @return 错误码
+ */
+static int init_cmd_processor(void)
+{
     // 初始化命令处理器
     commandContext = (CmdProcessorContext){
         .motionContext = &motionContext
     };
-    CmdProcessor_Init(&commandContext, &motionContext);
+    return CmdProcessor_Init(&commandContext, &motionContext);
+}
+
+int System_Initialize()
+{
+    if (isInitialized)
+    {
+        LOG_WARN(LOG_MODULE_SYSTEM, "System already initialized");
+        return ERR_SUCCESS;
+    }
+
+    int ret = ERR_SUCCESS;
+
+    // 清零所有状态
+    memset(&sysCtx, 0, sizeof(SystemContext));
+    memset(&motorService, 0, sizeof(MotorService));
+    memset(&steerInstance, 0, sizeof(SteerInstance));
+    memset(&motionContext, 0, sizeof(MotionContext));
+    memset(&commandContext, 0, sizeof(CmdProcessorContext));
+
+    // 初始化顺序：
+    // 1. 电机服务（依赖定时器和GPIO）
+    if ((ret = init_motor_service()) != ERR_SUCCESS)
+    {
+        LOG_ERROR(LOG_MODULE_SYSTEM, "Motor service init failed: 0x%04X", ret);
+        return ret;
+    }
 
 
+    // 2. 转向服务（依赖舵机PWM定时器）
+    if ((ret = init_steer_servo_service()) != ERR_SUCCESS)
+    {
+        LOG_ERROR(LOG_MODULE_SYSTEM, "Steer service init failed: 0x%04X", ret);
+        return ret;
+    }
+
+    // 3. 运动控制（依赖电机和转向服务）
+    if ((ret = init_motion_context()) != ERR_SUCCESS)
+    {
+        LOG_ERROR(LOG_MODULE_SYSTEM, "Motion context init failed: 0x%04X", ret);
+        return ret;
+    }
+
+    // 4. 命令处理器（依赖运动控制）
+    if ((ret = init_cmd_processor()) != ERR_SUCCESS)
+    {
+        LOG_ERROR(LOG_MODULE_SYSTEM, "Cmd processor init failed: 0x%04X", ret);
+        return ret;
+    }
+
+    // 设置系统上下文
     sysCtx.motionContext = &motionContext;
-    sysCtx.motorService = &motorService;
-    sysCtx.cmdContext = &commandContext;
+    sysCtx.motorService  = &motorService;
+    sysCtx.cmdContext    = &commandContext;
     sysCtx.steerInstance = &steerInstance;
 
+    isInitialized = true;
+    LOG_INFO(LOG_MODULE_SYSTEM, "System initialized successfully");
     return ERR_SUCCESS;
 }
 
 SystemContext* System_GetContext(void)
 {
-    return &sysCtx;
+    return isInitialized ? &sysCtx : NULL;
 }
