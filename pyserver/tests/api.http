@@ -19,7 +19,7 @@ Content-Type: application/json
     "params": {
       "left_rpm": 0,
       "right_rpm": 0,
-      "steer_angle": 900
+      "steer_angle": 300
     }
   }
 }

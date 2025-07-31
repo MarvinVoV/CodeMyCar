@@ -85,24 +85,22 @@ static int init_motor_service(void)
     motorSpec = (MotorSpec){
         .encoderPPR = 13,
         .gearRatio = 30,
-        .maxRPM = 400,
+        .maxRPM = 300,
         .wheelRadiusMM = DEFAULT_CHASSIS_CFG.wheelRadiusMM
     };
 
     // PID参数
     pidController = (PID_Controller){
         .params = {
-            .kp = 3.5f,                       // 提高比例增益（增强启动能力）
-            .ki = 0.4f,                       // 提高积分增益（加速误差消除）
-            .kd = 0.05f,                      // 降低微分增益（减少噪声影响）
-            .integral_max = 1.5f,             // 积分限幅，归一化后范围（1.5倍输出限幅）
-            .output_max = 1.0f,               // 输出限幅（100%占空比）
-            .anti_windup = true,              // 启用抗饱和
-            .integral_threshold = 0.1f,       // 积分激活阈值 归一化阈值（原值的1/500）
-            .dead_zone = 0.05f,               // 死区
-            .setpoint_change_threshold = 0.2f // 归一化阈值
+            .kp = 1.8f,                // 提高比例增益（增强启动能力）
+            .ki = 0.8f,               // 提高积分增益（加速误差消除）
+            .kd = 0.0f,                // 降低微分增益（减少噪声影响）
+            .integral_max = 1.0f,      // 积分限幅，归一化后范围（1.5倍输出限幅）
+            .output_max = 1.0f,        // 输出限幅（100%占空比）
+            .integral_threshold = 0.3f // 30%误差阈值
         }
     };
+
 
     motorLeftDriver = (MotorDriver){
         .halCfg = &leftHalCfg,

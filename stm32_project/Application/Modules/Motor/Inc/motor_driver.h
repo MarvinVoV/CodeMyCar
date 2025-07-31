@@ -59,9 +59,11 @@ typedef struct
         uint32_t lastRawPulses; ///< 上次原始脉冲值
     } position;
 
-    float           openLoopDuty;   ///< 当前开环占空比 [%]
-    uint32_t        lastUpdateTick; ///< 上次更新时间戳 [ms]
-    MotorDriverMode mode;           ///< 当前控制模式
+    float           openLoopDuty;    ///< 当前开环占空比 [%]
+    uint32_t        lastUpdateTick;  ///< 上次更新时间戳 [ms]
+    uint32_t        lastControlTick; ///< 控制执行时间戳[ms]
+    MotorDriverMode mode;            ///< 当前控制模式
+    MotorDirection  direction;       ///< 当前电机运动方向
 } MotorDriverState;
 
 /**
@@ -74,7 +76,8 @@ typedef struct
 
     struct
     {
-        MotorDriverMode mode;      ///< 当前控制模式
+        MotorDriverMode mode;      ///< 控制模式
+        MotorDirection  direction; ///< 方向
         float           targetRPM; ///< 目标转速 [RPM],表示电机输出轴（即经过减速后的最终输出轴）的转速
         PID_Controller  pidCtrl;   ///< PID控制器实例（非指针）
     } control;
@@ -86,6 +89,10 @@ typedef struct
         uint8_t windowSize;   ///< 速度滤波窗口大小
         float*  filterBuffer; ///< 滤波缓冲区
         uint8_t bufferIndex;  ///< 缓冲区索引
+        float   lpf_state;    ///< 低通滤波状态
+        // PWM输出滤波
+        float pwm_filter_state;
+        float pwm_alpha;
     } filter;
 } MotorDriver;
 

@@ -160,8 +160,8 @@ void HAL_Motor_SetDuty(HAL_MotorConfig* config, const float duty)
     const uint32_t arr = __HAL_TIM_GET_AUTORELOAD(config->pwm.tim);
 
     // 计算 CCR 值（四舍五入优化）
-    const uint32_t absDuty = (uint32_t)fabsf(clampedDuty);
-    const uint32_t ccr     = (absDuty * arr + 50u) / 100u;
+    const float    absDuty = fabsf(clampedDuty);
+    const uint32_t ccr     = (uint32_t)((absDuty * (float)arr / 100.0f) + 0.5f);
 
     // 确保 CCR 不超过 ARR
     const uint32_t safeCCR = (ccr > arr) ? arr : ccr;

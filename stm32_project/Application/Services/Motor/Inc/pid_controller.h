@@ -19,15 +19,13 @@
  */
 typedef struct
 {
-    float kp;                        ///< 比例系数（建议范围：0.1-10.0）
-    float ki;                        ///< 积分系数（建议范围：0.01-2.0）
-    float kd;                        ///< 微分系数（建议范围：0.0-1.0）
-    float integral_max;              ///< 积分限幅（防饱和，建议为output_max的1.2-2倍）
-    float output_max;                ///< 输出限幅（绝对值不超过该值）
-    bool  anti_windup;               ///< 抗饱和使能 (true=启用, false=禁用)
-    float integral_threshold;        ///< 积分激活阈值（误差小于此值时积分）
-    float dead_zone;                 ///< 死区阈值（误差小于此值时输出为0）
-    float setpoint_change_threshold; ///< 设定点变化阈值（单位：rad/s）
+    float kp;                 ///< 比例系数（建议范围：0.1-10.0）
+    float ki;                 ///< 积分系数（建议范围：0.01-2.0）
+    float kd;                 ///< 微分系数（建议范围：0.0-1.0）
+    float integral_max;       ///< 积分限幅（防饱和，建议为output_max的1.2-2倍）
+    float output_max;         ///< 输出限幅（绝对值不超过该值）
+    float integral_threshold; ///<误差阈值
+    float dead_zone;          ///<死区
 } PID_Params;
 
 /**
@@ -35,10 +33,9 @@ typedef struct
  */
 typedef struct
 {
-    float setpoint;         ///< 当前目标值
     float integral;         ///< 积分项累积值
     float prev_measurement; ///< 前次测量值（用于微分计算）
-    float output;           ///< 上一次输出值
+    float prev_error;       ///< 上一次误差
 } PID_State;
 
 /**

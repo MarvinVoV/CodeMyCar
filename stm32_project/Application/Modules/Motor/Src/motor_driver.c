@@ -9,8 +9,8 @@
 #include "motor_driver.h"
 #include "log_manager.h"
 
-/// 最小有效时间间隔 (1ms)
-#define MIN_DELTA_TIME_S 0.001f
+/// 最小有效时间间隔 (5ms)
+#define MIN_DELTA_TIME_S (0.005f)
 
 /// 默认速度滤波窗口大小
 #ifndef DEFAULT_SPEED_FILTER_WINDOW
@@ -80,14 +80,15 @@ static void update_revolutions(MotorDriverState* state,
  * @return float 滤波后速度
  */
 static float apply_speed_filter(MotorDriver* driver, float raw_speed);
-
+static float apply_pwm_filter(MotorDriver* driver, float raw_pwm);
+static float friction_compensation(float target_rpm, float actual_rpm);
 /**
  *  计算脉冲增量
  * @param driver  驱动控制器
  * @param current_raw 当前原始脉冲数
  * @return int32_t 脉冲增量
  */
-static int32_t calculate_delta_pulses(const MotorDriver* driver, uint32_t current_raw);
+static int32_t calculate_delta_pulses(MotorDriver* driver, uint32_t current_raw);
 
 //------------------------------------------------------------------------------
 // 公共API实现
@@ -124,11 +125,18 @@ bool MotorDriver_Init(MotorDriver* driver, const PID_Params* initialPid)
         memset(driver->filter.filterBuffer, 0, driver->filter.windowSize * sizeof(float));
         driver->filter.bufferIndex = 0;
     }
+    driver->filter.lpf_state = 0.0f;
+
+    // PWM滤波初始化
+    driver->filter.pwm_filter_state = 0.0f;
+    driver->filter.pwm_alpha        = 0.7f; // 默认值
 
     // 状态初始化
     memset(&driver->state, 0, sizeof(MotorDriverState));
-    driver->state.mode           = MOTOR_DRIVER_MODE_STOP;
-    driver->state.lastUpdateTick = HAL_GetTick();
+    driver->state.mode            = MOTOR_DRIVER_MODE_STOP;
+    driver->state.direction       = MOTOR_DIR_FORWARD;
+    driver->state.lastUpdateTick  = HAL_GetTick();
+    driver->state.lastControlTick = HAL_GetTick();
 
     // 初始化HAL层
     if (HAL_Motor_Init(driver->halCfg) != HAL_OK)
@@ -183,6 +191,9 @@ void MotorDriver_SetDutyCycle(MotorDriver* driver, const float duty)
     // 设置HAL层占空比
     HAL_Motor_SetDuty(driver->halCfg, clamped_duty);
 
+    // 更新方向
+    driver->state.direction = driver->halCfg->state.direction;
+
     // 更新状态
     driver->state.openLoopDuty = clamped_duty;
 }
@@ -211,7 +222,7 @@ void MotorDriver_Update(MotorDriver* driver)
 
     // 获取时间增量（毫秒）
     const uint32_t current_tick = HAL_GetTick();
-    const uint32_t last_tick    = driver->state.lastUpdateTick;
+    const uint32_t last_tick    = driver->state.lastControlTick;
 
     // 计算时间增量（秒）
     float delta_time_s = 0.0f;
@@ -225,15 +236,17 @@ void MotorDriver_Update(MotorDriver* driver)
     {
         return;
     }
+    // log delta_time_s
+    // LOG_INFO(LOG_MODULE_MOTOR, "delta_time_s: %.6f, current_tick=%lu, last_tick=%lu", delta_time_s, (unsigned long)current_tick, (unsigned long)last_tick);
+
+    // 更新时间戳
+    driver->state.lastControlTick = current_tick;
 
     // 获取当前编码器脉冲值
     const uint32_t current_raw = HAL_Motor_ReadRawEncoder(driver->halCfg);
 
     // 计算脉冲增量（处理计数器溢出）
     const int32_t delta_pulses = calculate_delta_pulses(driver, current_raw);
-
-    // 更新原始值存储
-    driver->state.position.lastRawPulses = current_raw;
 
     // 计算实际脉冲率（脉冲/秒）
     float pulses_per_sec = (float)delta_pulses / delta_time_s;
@@ -242,52 +255,69 @@ void MotorDriver_Update(MotorDriver* driver)
     driver->state.position.totalPulses += delta_pulses;
     update_revolutions(&driver->state, delta_pulses, driver->spec->encoderPPR, driver->spec->gearRatio);
 
+    // 计算每转的实际计数值（考虑4倍频）
+    const float counts_per_revolution        = 4.0f * (float)driver->spec->encoderPPR;
+    const float counts_per_output_revolution = counts_per_revolution * (float)driver->spec->gearRatio;
+
+
     // 计算实际转速（RPM）计算公式: RPM = (脉冲率 × 60) / (PPR × 减速比)
-    const float actual_rpm = (pulses_per_sec * 60.0f) /
-                             ((float)driver->spec->encoderPPR * (float)driver->spec->gearRatio);
+    const float actual_rpm = (pulses_per_sec * 60.0f) / counts_per_output_revolution;
+
+    // 应用速度滤波
+    const float filtered_rpm = apply_speed_filter(driver, actual_rpm);
 
     // 更新速度状态
-    driver->state.velocity.rpm   = actual_rpm;
-    driver->state.velocity.radps = rpm_to_radps(actual_rpm);
+    driver->state.velocity.rpm   = filtered_rpm;
+    driver->state.velocity.radps = rpm_to_radps(filtered_rpm);
     driver->state.velocity.mps   = radps_to_mps(driver->state.velocity.radps, driver->spec->wheelRadiusMM);
-
-    // 更新时间戳
-    driver->state.lastUpdateTick = current_tick;
 
 
     // 闭环控制处理
     if (driver->state.mode == MOTOR_DRIVER_MODE_CLOSED_LOOP)
     {
-        // 计算最大脉冲率（用于标准化）
-        const float max_pulses_rate = (driver->spec->maxRPM *
-                                       (float)driver->spec->encoderPPR *
-                                       (float)driver->spec->gearRatio) / 60.0f;
-
-        // 计算目标脉冲率（脉冲/秒）
-        const float target_pulses_per_sec = (driver->control.targetRPM *
-                                             (float)driver->spec->gearRatio *
-                                             (float)driver->spec->encoderPPR) / 60.0f;
-
-        // 标准化输入（-1到1范围）
-        const float normalized_target = target_pulses_per_sec / max_pulses_rate;
-        const float normalized_actual = pulses_per_sec / max_pulses_rate;
+        // 使用RPM直接归一化
+        const float max_rpm           = driver->spec->maxRPM;
+        const float normalized_target = driver->control.targetRPM / max_rpm;
+        const float normalized_actual = filtered_rpm / max_rpm;
+        // 限制归一化范围
+        const float safe_target = fmaxf(fminf(normalized_target, 1.0f), -1.0f);
+        const float safe_actual = fmaxf(fminf(normalized_actual, 1.0f), -1.0f);
 
         // 执行PID计算
-        const float output = PID_Calculate(&driver->control.pidCtrl, normalized_target,
-                                           normalized_actual, delta_time_s);
+        float output = PID_Calculate(&driver->control.pidCtrl, safe_target,
+                                     safe_actual, delta_time_s);
 
+        // output += friction_compensation(driver->control.targetRPM, filtered_rpm);
+
+        // 3. 应用PWM滤波
+        const float filtered_output = apply_pwm_filter(driver, output);
         // 应用输出
-        const float clamped_output = (output > 1.0f) ? 1.0f : (output < -1.0f) ? -1.0f : output;
+        const float clamped_output = (filtered_output > 1.0f)
+                                         ? 1.0f
+                                         : (filtered_output < -1.0f)
+                                         ? -1.0f
+                                         : filtered_output;
+
+        // // PID debug
+        static uint32_t last_print   = 0;
+        static float    elapsed_time = 0.0f;
+        if (HAL_GetTick() - last_print >= 20)
+        {
+            // 50Hz采样率
+            last_print = HAL_GetTick();
+            elapsed_time += 0.02f; // 20ms增量
+            // 格式：目标值,实际值,输出值\n
+            // LOG_INFO(LOG_MODULE_SYSTEM, "Target:%.2f, Actual:%.2f, Out:%.2f, Delta:%ld, dT:%.4f, %.2f,%.2f\n",
+            //          safe_target,
+            //          safe_actual, clamped_output,
+            //          (long)delta_pulses, delta_time_s, actual_rpm, driver->control.targetRPM);
+            LOG_INFO(LOG_MODULE_SYSTEM, "0,%.2f,%0.2f,50\n", safe_target * 100, safe_actual * 100);
+        }
 
         HAL_Motor_SetDuty(driver->halCfg, clamped_output * 100.0f);
 
-        // PID debug
-        static uint32_t last_print = 0;
-        if (HAL_GetTick() - last_print >= 20) { // 50Hz采样率
-            last_print = HAL_GetTick();
-            // 格式：目标值,实际值,输出值\n
-            LOG_INFO(LOG_MODULE_SYSTEM, "%.2f,%.2f,%.2f\n",normalized_target,normalized_actual, clamped_output);
-        }
+        // 更新时间戳（用于状态跟踪）
+        driver->state.lastUpdateTick = current_tick;
     }
 }
 
@@ -442,35 +472,78 @@ static float apply_speed_filter(MotorDriver* driver, float raw_speed)
     // 添加新采样值
     driver->filter.filterBuffer[driver->filter.bufferIndex] = raw_speed;
 
-    // 移动平均滤波
-    float sum = 0.0f;
+    // 加权移动平均
+    float         sum          = 0.0f;
+    float         weight_sum   = 0.0f;
+    const uint8_t center_index = driver->filter.windowSize / 2;
     for (uint8_t i = 0; i < driver->filter.windowSize; i++)
     {
-        sum += driver->filter.filterBuffer[i];
+        const float weight = 1.0f - fabsf((float)(i - center_index)) / (float)(center_index + 1);
+        sum += driver->filter.filterBuffer[i] * weight;
+        weight_sum += weight;
     }
+    const float ma_filtered = sum / weight_sum;
 
     // 更新索引
     driver->filter.bufferIndex = (driver->filter.bufferIndex + 1) % driver->filter.windowSize;
 
-    return sum / (float)driver->filter.windowSize;
+    // 二级低通滤波
+    const float alpha        = 0.5f; // 滤波系数
+    driver->filter.lpf_state = alpha * ma_filtered + (1 - alpha) * driver->filter.lpf_state;
+    return driver->filter.lpf_state;
 }
 
 //  计算脉冲增量
-int32_t calculate_delta_pulses(const MotorDriver* driver, const uint32_t current_raw)
+int32_t calculate_delta_pulses(MotorDriver* driver, const uint32_t current_raw)
 {
-    const uint32_t last_raw = driver->state.position.lastRawPulses;
     const uint32_t maxValue = HAL_Motor_GetEncoderMaxValue(driver->halCfg);
-    const uint32_t halfMax  = maxValue / 2;
+    const int32_t  maxVal   = (int32_t)maxValue;
+    const int32_t  halfMax  = maxVal / 2;
+    const uint32_t last_raw = driver->state.position.lastRawPulses;
+
+    // 首次调用初始化
+    if (last_raw == 0 && current_raw != 0)
+    {
+        driver->state.position.lastRawPulses = current_raw;
+        return 0;
+    }
 
     int32_t delta = (int32_t)current_raw - (int32_t)last_raw;
+    // 处理正向回绕（0 → maxValue）
+    if (delta < -halfMax)
+    {
+        delta += maxVal + 1;
+    }
+    // 处理反向回绕（maxValue → 0）
+    else if (delta > halfMax)
+    {
+        delta -= maxVal + 1;
+    }
 
-    if (delta > halfMax)
-    {
-        delta -= (int32_t)(maxValue + 1);
-    }
-    else if (delta < -(int32_t)halfMax)
-    {
-        delta += (int32_t)(maxValue + 1);
-    }
+    // 更新上次值
+    driver->state.position.lastRawPulses = current_raw;
+
     return delta;
+}
+
+// 应用PWM滤波
+float apply_pwm_filter(MotorDriver* driver, float raw_pwm)
+{
+    driver->filter.pwm_filter_state = driver->filter.pwm_alpha * raw_pwm +
+                                      (1 - driver->filter.pwm_alpha) * driver->filter.pwm_filter_state;
+    return driver->filter.pwm_filter_state;
+}
+
+// 添加静摩擦补偿
+static float friction_compensation(float target_rpm, float actual_rpm)
+{
+    const float STARTUP_THRESHOLD    = 5.0f; // RPM
+    const float STATIC_FRICTION_COMP = 0.3f; // 30%额外输出
+
+    if (fabsf(actual_rpm) < STARTUP_THRESHOLD &&
+        fabsf(target_rpm) > STARTUP_THRESHOLD)
+    {
+        return (target_rpm > 0) ? STATIC_FRICTION_COMP : -STATIC_FRICTION_COMP;
+    }
+    return 0.0f;
 }
