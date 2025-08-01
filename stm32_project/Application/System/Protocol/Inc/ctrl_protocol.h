@@ -38,6 +38,13 @@ typedef struct
     int16_t angularVel; ///< 角速度 (0.0644 rad/s步长)
 } DiffCtrlParam;
 
+/**
+ * @brief 自旋转控制参数
+ */
+struct
+{
+    float angularVel; // 角速度 (rad/s)
+} spinCtrl;           
 
 /**
  * @brief 直接控制参数
@@ -81,7 +88,7 @@ typedef struct
              *  2000 = 2.0 m/s
              *  -1500 = -1.5 m/s
              */
-            int16_t linearVel;  ///< 目标线速度 (0.001 m/s步长)
+            int16_t linearVel; ///< 目标线速度 (0.001 m/s步长)
             /**
              * @brief 目标角速度
              *

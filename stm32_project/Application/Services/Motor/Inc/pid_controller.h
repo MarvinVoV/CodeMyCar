@@ -33,9 +33,10 @@ typedef struct
  */
 typedef struct
 {
-    float integral;         ///< 积分项累积值
-    float prev_measurement; ///< 前次测量值（用于微分计算）
-    float prev_error;       ///< 上一次误差
+    float prev_error;       ///< 上一次误差 e[k-1]
+    float prev_output;      ///< 上一次输出值
+    float prev_measurement; ///< 上一次测量值（用于微分计算）
+    bool  first_run;        ///< 首次运行标志
 } PID_State;
 
 /**
@@ -54,12 +55,6 @@ typedef struct
  */
 void PIDController_Init(PID_Controller* pid, const PID_Params* params);
 
-/**
- * @brief 设置PID控制器参数
- * @param pid PID控制器实例指针
- * @param params 新的参数值
- */
-void PID_SetParameters(PID_Controller* pid, const PID_Params* params);
 
 /**
  * @brief 执行PID计算
