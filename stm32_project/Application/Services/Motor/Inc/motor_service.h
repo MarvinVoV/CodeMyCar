@@ -71,7 +71,8 @@ typedef struct
 typedef struct
 {
     MotorInstance instances[MOTOR_MAX_NUM]; ///< 电机实例数组
-    osThreadId_t  taskHandle;               ///< 任务句柄
+    osThreadId_t  leftInstanceTaskHandle;   ///< Left任务句柄
+    osThreadId_t  rightInstanceTaskHandle;  ///< Right任务句柄
 } MotorService;
 
 
@@ -150,11 +151,11 @@ int MotorService_emergencyStop(MotorService* service, MotorID motorId);
 /**
  * @brief 更新所有电机状态
  *
- * @param[in] service 服务实例
+ * @param instance 服务实例
  *
  * @note 应在控制循环中周期性调用
  */
-void MotorService_updateState(MotorService* service);
+void MotorService_updateState(MotorInstance* instance);
 
 /**
  * @brief 获取电机状态

@@ -81,7 +81,7 @@ static void update_revolutions(MotorDriverState* state,
  */
 static float apply_speed_filter(MotorDriver* driver, float raw_speed);
 static float apply_pwm_filter(MotorDriver* driver, float raw_pwm);
-static float friction_compensation(float target_rpm, float actual_rpm);
+static float calculate_feedforward(float target_rpm, float actual_rpm);
 /**
  *  计算脉冲增量
  * @param driver  驱动控制器
@@ -286,13 +286,14 @@ void MotorDriver_Update(MotorDriver* driver)
         const float safe_actual = fmaxf(fminf(normalized_actual, 1.0f), -1.0f);
 
         // 执行PID计算
-        float output = PID_Calculate(&driver->control.pidCtrl, safe_target,
-                                     safe_actual, delta_time_s);
+        float output = PID_Calculate(&driver->control.pidCtrl, safe_target, safe_actual, delta_time_s, driver->id);
 
-        // output += friction_compensation(driver->control.targetRPM, filtered_rpm);
+        // 添加前馈
+        output += calculate_feedforward(driver->control.targetRPM, filtered_rpm);
 
         // 3. 应用PWM滤波
         const float filtered_output = apply_pwm_filter(driver, output);
+
         // 应用输出
         const float clamped_output = (filtered_output > 1.0f)
                                          ? 1.0f
@@ -311,15 +312,15 @@ void MotorDriver_Update(MotorDriver* driver)
             //          safe_target * 100,
             //          safe_actual * 100,
             //          clamped_output * 100);
-
-            LOG_INFO(LOG_MODULE_SYSTEM, "T=%.3f, ID=%d, Targ=%.2f, Act=%.2f, Out=%.2f, RPM=%.1f, Pulses=%ld",
-                     driver->state.debug.logElapsedTime,
-                     driver->id,
-                     safe_target * 100,
-                     safe_actual * 100,
-                     clamped_output * 100,
-                     filtered_rpm,
-                     driver->state.position.totalPulses);
+            //
+            // LOG_INFO(LOG_MODULE_SYSTEM, "T=%.3f, ID=%d, Targ=%.2f, Act=%.2f, Out=%.2f, RPM=%.1f, Pulses=%ld",
+            //          driver->state.debug.logElapsedTime,
+            //          driver->id,
+            //          safe_target * 100,
+            //          safe_actual * 100,
+            //          clamped_output * 100,
+            //          filtered_rpm,
+            //          driver->state.position.totalPulses);
         }
 
         HAL_Motor_SetDuty(driver->halCfg, clamped_output * 100.0f);
@@ -542,16 +543,71 @@ float apply_pwm_filter(MotorDriver* driver, float raw_pwm)
     return driver->filter.pwm_filter_state;
 }
 
-// 添加静摩擦补偿
-static float friction_compensation(float target_rpm, float actual_rpm)
+float calculate_feedforward(float target_rpm, float filtered_rpm)
 {
-    const float STARTUP_THRESHOLD    = 5.0f; // RPM
-    const float STATIC_FRICTION_COMP = 0.3f; // 30%额外输出
+    // 1. 确定旋转方向
+    const float direction  = (target_rpm >= 0.0f) ? 1.0f : -1.0f;
+    const float abs_target = fabsf(target_rpm);
+    const float abs_rpm    = fabsf(filtered_rpm);
 
-    if (fabsf(actual_rpm) < STARTUP_THRESHOLD &&
-        fabsf(target_rpm) > STARTUP_THRESHOLD)
+    // 2. 基础前馈
+    const float FEEDFORWARD_GAIN = 0.0028f;
+    float       base_ff          = abs_target * FEEDFORWARD_GAIN * direction;
+
+    // === 关键改进：平滑启动处理 ===
+
+    // 2.1 低速前馈增益调整
+    if (abs_target < 20.0f)
     {
-        return (target_rpm > 0) ? STATIC_FRICTION_COMP : -STATIC_FRICTION_COMP;
+        float gain_factor = 1.0f;
+        // 从0.7到1.0的平滑过渡
+        gain_factor = 0.7f + 0.3f * (abs_target / 20.0f);
+        base_ff *= gain_factor;
     }
-    return 0.0f;
+
+    // 2.2 启动曲线（0-15 RPM）
+    if (abs_target <= 15.0f && abs_rpm < 5.0f)
+    {
+        float startup_curve = 1.0f;
+        // 从0.3到1.0的平滑过渡
+        const float startup_factor = fmaxf(0.3f, abs_target / 15.0f);
+        startup_curve              = 0.7f * startup_factor + 0.3f;
+        base_ff *= startup_curve;
+    }
+
+    // 3. 自适应摩擦补偿
+    float friction_comp = 0.0f;
+
+    // 3.1 静摩擦补偿（随目标RPM和速度平滑变化）
+    if (abs_rpm < 5.0f && abs_target > 0.1f)
+    {
+        // 静摩擦随目标RPM线性变化 (0.01-0.03)
+        const float target_factor   = fminf(abs_target / 50.0f, 1.0f);
+        const float static_friction = 0.01f + 0.02f * target_factor;
+
+        // 随速度平滑过渡到动摩擦
+        const float speed_factor = 1.0f - fminf(abs_rpm / 5.0f, 1.0f);
+        friction_comp            = static_friction * speed_factor * direction;
+    }
+    // 3.2 动摩擦补偿（随速度增加）
+    else if (abs_target > 0.1f)
+    {
+        const float dynamic_friction = 0.005f + 0.005f * (abs_rpm / 50.0f);
+        friction_comp                = dynamic_friction * direction;
+    }
+
+
+    // 5. 组合所有前馈项
+    float feedforward = base_ff + friction_comp;
+
+    // 6. 启动阶段额外限幅（关键！）
+    if (abs_rpm < 5.0f && abs_target > 10.0f)
+    {
+        // 启动阶段限制最大前馈
+        const float max_startup = 0.08f + 0.02f * (abs_target / 50.0f);
+        feedforward             = CLAMP(feedforward, -max_startup, max_startup);
+    }
+
+    // 7. 全局限幅
+    return CLAMP(feedforward, -1.0f, 1.0f);
 }

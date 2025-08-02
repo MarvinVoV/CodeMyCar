@@ -222,55 +222,51 @@ int MotorService_emergencyStop(MotorService* service, MotorID motorId)
     return ERR_SUCCESS;
 }
 
-void MotorService_updateState(MotorService* service)
+void MotorService_updateState(MotorInstance* instance)
 {
-    if (service == NULL)
+    if (instance == NULL)
     {
-        LOG_ERROR(LOG_MODULE_MOTOR, "Invalid service instance");
+        LOG_ERROR(LOG_MODULE_MOTOR, "Invalid motor instance");
         return;
     }
 
-    for (int i = 0; i < MOTOR_MAX_NUM; ++i)
+    // 跳过未初始化实例
+    if (!instance->isInitialized)
     {
-        MotorInstance* instance = &service->instances[i];
-        // 跳过未初始化实例
-        if (!instance->isInitialized)
-        {
-            LOG_ERROR(LOG_MODULE_MOTOR, "Motor instance %d not initialized", i);
-            continue;
-        }
-        // 获取互斥锁
-        if (osMutexAcquire(instance->mutex, MUTEX_TIMEOUT_MS) != osOK)
-        {
-            LOG_WARN(LOG_MODULE_MOTOR, "Mutex timeout for motor %d", i);
-            continue;
-        }
-
-        // 驱动状态更新
-        MotorDriver_Update(instance->driver);
-
-        // 获取驱动状态
-        const MotorDriverState driverState = MotorDriver_getState(instance->driver);
-
-        // 更新服务层状态
-        instance->state.velocity.rpm         = driverState.velocity.rpm;
-        instance->state.velocity.mps         = driverState.velocity.mps;
-        instance->state.position.revolutions = driverState.position.revolutions;
-        instance->state.position.odometer    = calculate_odometer(
-            driverState.position.revolutions,
-            instance->driver->spec->wheelRadiusMM
-        );
-        instance->state.mode       = driverState.mode;
-        instance->state.lastUpdate = HAL_GetTick();
-
-        // 开环模式下记录占空比
-        if (driverState.mode == MOTOR_DRIVER_MODE_OPEN_LOOP)
-        {
-            instance->state.openLoopDuty = driverState.openLoopDuty / 100.0f;
-        }
-
-        osMutexRelease(instance->mutex);
+        LOG_ERROR(LOG_MODULE_MOTOR, "Motor instance %d not initialized", instance->driver->id);
+        return;
     }
+    // 获取互斥锁
+    if (osMutexAcquire(instance->mutex, MUTEX_TIMEOUT_MS) != osOK)
+    {
+        LOG_WARN(LOG_MODULE_MOTOR, "Mutex timeout for motor %d", instance->driver->id);
+        return;
+    }
+
+    // 驱动状态更新
+    MotorDriver_Update(instance->driver);
+
+    // 获取驱动状态
+    const MotorDriverState driverState = MotorDriver_getState(instance->driver);
+
+    // 更新服务层状态
+    instance->state.velocity.rpm         = driverState.velocity.rpm;
+    instance->state.velocity.mps         = driverState.velocity.mps;
+    instance->state.position.revolutions = driverState.position.revolutions;
+    instance->state.position.odometer    = calculate_odometer(
+        driverState.position.revolutions,
+        instance->driver->spec->wheelRadiusMM
+    );
+    instance->state.mode       = driverState.mode;
+    instance->state.lastUpdate = HAL_GetTick();
+
+    // 开环模式下记录占空比
+    if (driverState.mode == MOTOR_DRIVER_MODE_OPEN_LOOP)
+    {
+        instance->state.openLoopDuty = driverState.openLoopDuty / 100.0f;
+    }
+
+    osMutexRelease(instance->mutex);
 }
 
 MotorState MotorService_getState(MotorService* service, MotorID motorId)

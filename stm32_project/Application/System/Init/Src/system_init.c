@@ -44,7 +44,8 @@ static ServoDriver servoDriver;
 // 全局静态变量
 static HAL_MotorConfig leftHalCfg;
 static HAL_MotorConfig rightHalCfg;
-static MotorSpec       motorSpec;
+static MotorSpec       leftMotorSpec;
+static MotorSpec       rightMotorSpec;
 static PID_Controller  leftPidControllerInstance;
 static PID_Controller  rightPidControllerInstance;
 
@@ -83,7 +84,13 @@ static int init_motor_service(void)
     };
 
     // 电机规格参数
-    motorSpec = (MotorSpec){
+    leftMotorSpec = (MotorSpec){
+        .encoderPPR = 13,
+        .gearRatio = 30,
+        .maxRPM = 300,
+        .wheelRadiusMM = DEFAULT_CHASSIS_CFG.wheelRadiusMM
+    };
+    rightMotorSpec = (MotorSpec){
         .encoderPPR = 13,
         .gearRatio = 30,
         .maxRPM = 300,
@@ -93,31 +100,47 @@ static int init_motor_service(void)
     // 左轮PID参数
     leftPidControllerInstance = (PID_Controller){
         .params = {
-            .kp = 0.8f,                // 提高比例增益（增强启动能力）
-            .ki = 3.5f,                // 提高积分增益（加速误差消除）
-            .kd = 0.0001f,             // 降低微分增益（减少噪声影响）
-            .integral_max = 1.0f,      // 积分限幅，归一化后范围（1.5倍输出限幅）
-            .output_max = 1.0f,        // 输出限幅（100%占空比）
-            .integral_threshold = 0.0f // 30%误差阈值
+            .kp = 0.68f,                  // 提高比例增益（增强启动能力）
+            .ki = 0.9f,                   // 提高积分增益（加速误差消除）
+            .kd = 0.09f,                  // 降低微分增益（减少噪声影响）
+            .output_max = 1.0f,           // 输出限幅（100%占空比）
+            .integral_threshold = 0.005f, // 误差阈值
+            .dead_zone = 0.002f
+        },
+        .state = {
+            .first_run = true,
+            .prev_error = 0.0f,
+            .prev_measurement = 0.0f,
+            .prev_output = 0.0f,
+            .direction_stable = true, // 新增状态：方向稳定性
+            .stable_threshold = 0.1f  // 稳定阈值
         }
     };
 
     // 右轮PID参数
     rightPidControllerInstance = (PID_Controller){
         .params = {
-            .kp = 0.8f,                // 提高比例增益（增强启动能力）
-            .ki = 3.5f,                // 提高积分增益（加速误差消除）
-            .kd = 0.0001f,             // 降低微分增益（减少噪声影响）
-            .integral_max = 1.0f,      // 积分限幅，归一化后范围（1.5倍输出限幅）
-            .output_max = 1.0f,        // 输出限幅（100%占空比）
-            .integral_threshold = 0.0f // 30%误差阈值
+            .kp = 0.68f,                  // 提高比例增益（增强启动能力）
+            .ki = 0.9f,                   // 提高积分增益（加速误差消除）
+            .kd = 0.09f,                  // 降低微分增益（减少噪声影响）
+            .output_max = 1.0f,           // 输出限幅（100%占空比）
+            .integral_threshold = 0.005f, // 误差阈值
+            .dead_zone = 0.002f
+        },
+        .state = {
+            .first_run = true,
+            .prev_error = 0.0f,
+            .prev_measurement = 0.0f,
+            .prev_output = 0.0f,
+            .direction_stable = true, // 新增状态：方向稳定性
+            .stable_threshold = 0.1f  // 稳定阈值
         }
     };
 
     motorLeftDriver = (MotorDriver){
         .id = 0,
         .halCfg = &leftHalCfg,
-        .spec = &motorSpec,
+        .spec = &leftMotorSpec,
         .control = {
             .mode = MOTOR_DRIVER_MODE_STOP,
             .pidCtrl = leftPidControllerInstance,
@@ -128,7 +151,7 @@ static int init_motor_service(void)
     motorRightDriver = (MotorDriver){
         .id = 1,
         .halCfg = &rightHalCfg,
-        .spec = &motorSpec,
+        .spec = &rightMotorSpec,
         .control = {
             .mode = MOTOR_DRIVER_MODE_STOP,
             .pidCtrl = rightPidControllerInstance,

@@ -10,6 +10,7 @@
 #ifndef CLAMP
 #define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
 #include <stdbool.h>
+#include <stdint.h>
 #endif
 
 #define ZERO_TARGET_THRESHOLD  (0.1f)
@@ -22,7 +23,6 @@ typedef struct
     float kp;                 ///< 比例系数（建议范围：0.1-10.0）
     float ki;                 ///< 积分系数（建议范围：0.01-2.0）
     float kd;                 ///< 微分系数（建议范围：0.0-1.0）
-    float integral_max;       ///< 积分限幅（防饱和，建议为output_max的1.2-2倍）
     float output_max;         ///< 输出限幅（绝对值不超过该值）
     float integral_threshold; ///<误差阈值
     float dead_zone;          ///<死区
@@ -33,10 +33,14 @@ typedef struct
  */
 typedef struct
 {
+    float prev_prev_error;  ///<上上次误差 e[k-2]
     float prev_error;       ///< 上一次误差 e[k-1]
     float prev_output;      ///< 上一次输出值
     float prev_measurement; ///< 上一次测量值（用于微分计算）
+    float filtered_deriv;   ///< 滤波后的微分值
     bool  first_run;        ///< 首次运行标志
+    bool  direction_stable; ///<方向稳定性
+    float stable_threshold; // 稳定阈值
 } PID_State;
 
 /**
@@ -64,7 +68,7 @@ void PIDController_Init(PID_Controller* pid, const PID_Params* params);
  * @param delta_time 距离上次计算的时间间隔（秒）
  * @return 计算得到的控制输出值
  */
-float PID_Calculate(PID_Controller* pid, float setpoint, float measurement, float delta_time);
+float PID_Calculate(PID_Controller* pid, float setpoint, float measurement, float delta_time, uint8_t index);
 
 /**
  * @brief 重置控制器内部状态

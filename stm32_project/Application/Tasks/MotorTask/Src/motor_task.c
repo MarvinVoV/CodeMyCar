@@ -16,7 +16,8 @@
 
 #define CONTROL_FREQ_FIXED   (200)   // 固定控制频率 (Hz) = 5ms
 
-static osThreadId_t taskHandle = NULL;
+static osThreadId_t leftInstanceTaskHandle  = NULL;
+static osThreadId_t rightInstanceTaskHandle = NULL;
 
 void MotorTask_init(MotorService* motorService)
 {
@@ -25,31 +26,45 @@ void MotorTask_init(MotorService* motorService)
         LOG_ERROR(LOG_MODULE_SERVO, "MotorService is NULL");
         return;
     }
-    const osThreadAttr_t taskAttributes = {
-        .name = "MotorTask",
+    const osThreadAttr_t leftInstanceAttributes = {
+        .name = "MotorTask_Left",
         .stack_size = 512 * 4,
         .priority = (osPriority_t)osPriorityNormal,
     };
-    taskHandle = osThreadNew(MotorTask_doTask, motorService, &taskAttributes);
-    if (taskHandle == NULL)
+    const osThreadAttr_t rightInstanceAttributes = {
+        .name = "MotorTask_Left",
+        .stack_size = 512 * 4,
+        .priority = (osPriority_t)osPriorityNormal,
+    };
+
+    leftInstanceTaskHandle = osThreadNew(MotorTask_doTask, &motorService->instances[0], &leftInstanceAttributes);
+    if (leftInstanceTaskHandle == NULL)
     {
-        LOG_ERROR(LOG_MODULE_SERVO, "Failed to create MotorTask");
+        LOG_ERROR(LOG_MODULE_SERVO, "Failed to create MotorTask_Left");
     }
+    motorService->leftInstanceTaskHandle = leftInstanceTaskHandle;
+
+    rightInstanceTaskHandle = osThreadNew(MotorTask_doTask, &motorService->instances[1], &rightInstanceAttributes);
+    if (rightInstanceTaskHandle == NULL)
+    {
+        LOG_ERROR(LOG_MODULE_SERVO, "Failed to create MotorTask_Right");
+    }
+    motorService->rightInstanceTaskHandle = rightInstanceTaskHandle;
 }
 
 void MotorTask_doTask(void* arg)
 {
-    MotorService* service = (MotorService*)arg;
+    MotorInstance* motorInstance = (MotorInstance*)arg;
     // 固定5ms间隔
-    const TickType_t xFixedInterval = pdMS_TO_TICKS(10); // ms
+    const TickType_t xFixedInterval = pdMS_TO_TICKS(30); // ms
 
-    TickType_t       xLastWakeTime  = xTaskGetTickCount();
+    TickType_t xLastWakeTime = xTaskGetTickCount();
 
     while (1)
     {
         // 执行状态更新（确保原子性）
         taskENTER_CRITICAL();
-        MotorService_updateState(service);
+        MotorService_updateState(motorInstance);
         taskEXIT_CRITICAL();
 
         // 精确周期延迟（带自动补偿）
