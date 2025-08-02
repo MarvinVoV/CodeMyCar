@@ -23,9 +23,9 @@
  */
 typedef enum
 {
-    MOTOR_LEFT_WHEEL = 0, ///< 左轮电机
-    MOTOR_RIGHT_WHEEL,    ///< 右轮电机
-    MOTOR_MAX_NUM         ///< 最大电机数量
+    MOTOR_LEFT_WHEEL  = 0, ///< 左轮电机
+    MOTOR_RIGHT_WHEEL = 1, ///< 右轮电机
+    MOTOR_MAX_NUM     = 2  ///< 最大电机数量
 } MotorID;
 
 

@@ -133,10 +133,12 @@ bool MotorDriver_Init(MotorDriver* driver, const PID_Params* initialPid)
 
     // 状态初始化
     memset(&driver->state, 0, sizeof(MotorDriverState));
-    driver->state.mode            = MOTOR_DRIVER_MODE_STOP;
-    driver->state.direction       = MOTOR_DIR_FORWARD;
-    driver->state.lastUpdateTick  = HAL_GetTick();
-    driver->state.lastControlTick = HAL_GetTick();
+    driver->state.mode                 = MOTOR_DRIVER_MODE_STOP;
+    driver->state.direction            = MOTOR_DIR_FORWARD;
+    driver->state.lastUpdateTick       = HAL_GetTick();
+    driver->state.lastControlTick      = HAL_GetTick();
+    driver->state.debug.lastLogPrint   = 0;
+    driver->state.debug.logElapsedTime = 0.0f;
 
     // 初始化HAL层
     if (HAL_Motor_Init(driver->halCfg) != HAL_OK)
@@ -299,19 +301,25 @@ void MotorDriver_Update(MotorDriver* driver)
                                          : filtered_output;
 
         // // PID debug
-        static uint32_t last_print   = 0;
-        static float    elapsed_time = 0.0f;
-        if (HAL_GetTick() - last_print >= 20)
+        if (HAL_GetTick() - driver->state.debug.lastLogPrint >= 20)
         {
             // 50Hz采样率
-            last_print = HAL_GetTick();
-            elapsed_time += 0.02f; // 20ms增量
-            // 格式：目标值,实际值,输出值\n
-            // LOG_INFO(LOG_MODULE_SYSTEM, "Target:%.2f, Actual:%.2f, Out:%.2f, Delta:%ld, dT:%.4f, %.2f,%.2f\n",
-            //          safe_target,
-            //          safe_actual, clamped_output,
-            //          (long)delta_pulses, delta_time_s, actual_rpm, driver->control.targetRPM);
-            LOG_INFO(LOG_MODULE_SYSTEM, "0,%.2f,%0.2f,50\n", safe_target * 100, safe_actual * 100);
+            driver->state.debug.lastLogPrint = HAL_GetTick();
+            driver->state.debug.logElapsedTime += 0.02f; // 20ms增量
+            // LOG_INFO(LOG_MODULE_SYSTEM, "%d,%.2f,%.2f,%.2f\n",
+            //          driver->id,
+            //          safe_target * 100,
+            //          safe_actual * 100,
+            //          clamped_output * 100);
+
+            LOG_INFO(LOG_MODULE_SYSTEM, "T=%.3f, ID=%d, Targ=%.2f, Act=%.2f, Out=%.2f, RPM=%.1f, Pulses=%ld",
+                     driver->state.debug.logElapsedTime,
+                     driver->id,
+                     safe_target * 100,
+                     safe_actual * 100,
+                     clamped_output * 100,
+                     filtered_rpm,
+                     driver->state.position.totalPulses);
         }
 
         HAL_Motor_SetDuty(driver->halCfg, clamped_output * 100.0f);

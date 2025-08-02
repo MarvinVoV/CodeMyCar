@@ -236,6 +236,7 @@ void MotorService_updateState(MotorService* service)
         // 跳过未初始化实例
         if (!instance->isInitialized)
         {
+            LOG_ERROR(LOG_MODULE_MOTOR, "Motor instance %d not initialized", i);
             continue;
         }
         // 获取互斥锁

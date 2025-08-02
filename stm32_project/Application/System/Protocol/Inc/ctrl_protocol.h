@@ -39,14 +39,6 @@ typedef struct
 } DiffCtrlParam;
 
 /**
- * @brief 自旋转控制参数
- */
-struct
-{
-    float angularVel; // 角速度 (rad/s)
-} spinCtrl;           
-
-/**
  * @brief 直接控制参数
  */
 typedef struct

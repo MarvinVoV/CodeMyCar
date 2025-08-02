@@ -59,6 +59,12 @@ typedef struct
         uint32_t lastRawPulses; ///< 上次原始脉冲值
     } position;
 
+    struct
+    {
+        uint32_t lastLogPrint;   ///<< 每个电机独立的日志时间戳
+        float    logElapsedTime; ///<< 每个电机独立的时间累积
+    } debug;
+
     float           openLoopDuty;    ///< 当前开环占空比 [%]
     uint32_t        lastUpdateTick;  ///< 上次更新时间戳 [ms]
     uint32_t        lastControlTick; ///< 控制执行时间戳[ms]
@@ -73,6 +79,7 @@ typedef struct
 {
     HAL_MotorConfig* halCfg; ///< 硬件抽象层配置
     const MotorSpec* spec;   ///< 电机规格参数
+    uint8_t          id;     ///< 电机ID
 
     struct
     {
