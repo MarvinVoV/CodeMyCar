@@ -68,6 +68,14 @@ class MixedSteerProtocolParam(NamedTuple):
                            )
 
 
+class SpinProtocolParam(NamedTuple):
+    """自旋参数 (设备协议层)"""
+    angular_vel: int  # 0.1度步长
+    rotation_point: int  # 0.392%步长
+
+    def to_bytes(self) -> bytes:
+        return struct.pack('<Hh', self.angular_vel, self.rotation_point).ljust(7, b'\x00')
+
 # --------------------------
 # 设备协议指令模型
 # --------------------------

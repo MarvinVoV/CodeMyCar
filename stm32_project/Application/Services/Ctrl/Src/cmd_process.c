@@ -189,8 +189,9 @@ static int process_motion_command(CmdProcessorContext* ctx, const MotionCmd* mot
 
         case MOTION_SPIN_IN_PLACE:
             {
-                const float angular = decode_angular_vel(motion->params.diffCtrl.angularVel);
-                ret                 = MotionService_SetSpinParams(motionCtx, angular);
+                const float   angularVel    = decode_angular_vel(motion->params.spinCtrl.angularVel);
+                const uint8_t rotationPoint = motion->params.spinCtrl.rotationPoint;
+                ret                         = MotionService_SetSpinParams(motionCtx, angularVel, rotationPoint);
             }
             break;
 

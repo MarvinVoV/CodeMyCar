@@ -107,6 +107,23 @@ typedef struct
     uint8_t differentialGain; ///< 差速增益 (0-100%)
 } MixedCtrlParam;
 
+
+/**
+ * @brief 原地旋转控制参数
+ */
+typedef struct
+{
+    /**
+     * @brief 目标角速度
+     *
+     * 分辨率：0.0644 rad/s
+     * 角速度范围: 0 ~ 12rad/s （按照最大转速 300rpm 设置）
+     * 解码前设置范围 ：-186 ~ 186, angular_vel = 12 / 0.0644 ≈ 186.34
+     */
+    int16_t angularVel;    ///< 角速度 (0.0644 rad/s步长)
+    uint8_t rotationPoint; ///< 旋转中心点 (0=中心, 1=前轴, 2=后轴)
+} SpinCtrlParam;
+
 /**
  * @brief 运动控制指令
  */
@@ -120,6 +137,7 @@ typedef struct
         DirectCtrlParam    directCtrl;        ///< 直接控制参数
         MixedCtrlParam     mixedCtrl;         ///< 混合控制参数
         DiffCtrlParam      diffCtrl;          ///< 差速控制参数
+        SpinCtrlParam      spinCtrl;          ///< 旋转参数
     } params;
 } MotionCmd;
 

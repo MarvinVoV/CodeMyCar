@@ -27,6 +27,7 @@ typedef struct
     float maxSteerAngleDeg;     ///< 最大转向角度 (deg)
     float maxAngularVelRad;     ///< 最大角速度 (rad/s)
     float maxLinearVelocityMPS; ///< 最大线速度 (m/s)
+    float steerCenterAngleDeg;  ///< 中心角度 (deg)
 } ChassisConfig;
 
 
@@ -60,6 +61,12 @@ typedef struct
             float rightRpm;   ///< 右轮目标转速 (RPM)
             float steerAngle; ///< 目标转向角 (deg)
         } directCtrl;
+
+        struct
+        {
+            float   angularVelocity; ///< 角速度 (0.0644 rad/s步长)
+            uint8_t rotationPoint;   ///< 旋转中心点 (0=中心, 1=前轴, 2=后轴)
+        } spinCtrl;
 
         // 混合控制参数
         struct
@@ -257,12 +264,13 @@ int MotionService_SetMixedDutyParams(MotionContext* ctx,
  *
  * @param ctx 上下文指针
  * @param angular_vel 目标角速度 (rad/s)
+ * @param rotation_point 旋转点 0=中心, 1=前轴, 2=后轴
  *
  * @retval ERR_SUCCESS0 设置成功
  * @retval ERR_MOTION_INVALID_PARAM 参数无效
  * @retval ERR_MOTION_MODE_MISMATCH 模式不匹配
  */
-int MotionService_SetSpinParams(MotionContext* ctx, float angular_vel);
+int MotionService_SetSpinParams(MotionContext* ctx, float angular_vel, uint8_t rotation_point);
 
 /**
  * @brief 设置转向角度 （STEER_ONLY/MIXED模式）

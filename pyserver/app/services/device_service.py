@@ -5,7 +5,7 @@ from mqtt.mqtt_client import MQTTClientWrapper
 from web.schemas import ControlCommand, CommonResponse
 
 from device.protocol.models import MotionProtocolMode, ControlProtocolCommand, MotionProtocolCommand, \
-    DiffCtrlProtocolParam, DirectCtrlProtocolParam, AckermannProtocolParam, MixedSteerProtocolParam
+    DiffCtrlProtocolParam, DirectCtrlProtocolParam, AckermannProtocolParam, MixedSteerProtocolParam, SpinProtocolParam
 
 logger = get_logger()
 
@@ -53,9 +53,9 @@ class DeviceService:
                     differential_gain=command.motion.params.differential_gain
                 )
             elif motion_mode == MotionProtocolMode.SPIN_IN_PLACE:
-                params = DiffCtrlProtocolParam(
-                    linear_vel=0,  # 原地旋转线速度设为0
-                    angular_vel=command.motion.params.angular_vel
+                params = SpinProtocolParam(
+                    angular_vel=command.motion.params.angular_vel,
+                    rotation_point=command.motion.params.rotation_point
                 )
             else:
                 params = None

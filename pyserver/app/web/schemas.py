@@ -46,6 +46,12 @@ class DirectParams(BaseModel):
     steer_angle: int = Field(..., ge=-32768, le=32767, description="舵机角度 (0.1度步长)")
 
 
+class SpinParams(BaseModel):
+    """直接控制参数"""
+    angular_vel: int = Field(..., ge=-168, le=168, description="角速度")
+    rotation_point: int = Field(..., ge=-32768, le=32767, description="0=中心, 1=前轴, 2=后轴")
+
+
 class AckermannParams(BaseModel):
     """阿克曼转向参数"""
     linear_vel: int = Field(..., ge=0, le=65535, description="线速度 (0.01m/s步长)")
@@ -63,7 +69,7 @@ class MotionCommand(BaseModel):
     """运动控制指令 (简化命名)"""
     mode: MotionMode
     duration: int = Field(..., ge=0, le=65535, description="持续时间 (ms)")
-    params: Union[DifferentialParams, DirectParams, AckermannParams, MixedParams] = None
+    params: Union[DifferentialParams, DirectParams, AckermannParams, MixedParams, SpinParams] = None
 
     @model_validator(mode='after')
     def check_params(self):

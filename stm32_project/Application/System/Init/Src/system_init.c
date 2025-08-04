@@ -19,7 +19,8 @@ static const ChassisConfig DEFAULT_CHASSIS_CFG = {
     .wheelRadiusMM = 32.5f,       // 驱动轮半径，单位：毫米(mm)
     .maxLinearVelocityMPS = 1.2f, // 最大允许线速度，单位：米/秒(m/s) 正值为前进，负值为后退
     .maxAngularVelRad = 8.2f,     // 最大允许角速度，单位：弧度/秒(rad/s)
-    .maxSteerAngleDeg = 45.0f     // 前轮最大转向角度，单位：度(degree) 正值右转，负值左转
+    .maxSteerAngleDeg = 45.0f,     // 前轮最大转向角度，单位：度(degree) 正值右转，负值左转
+    .steerCenterAngleDeg = 90.0f, // 归中角度
 };
 
 // // 舵机参数
@@ -65,21 +66,21 @@ static int init_motor_service(void)
 {
     // 左轮电机配置
     leftHalCfg = (HAL_MotorConfig){
-        .pwm = {.tim = &htim3, .ch = TIM_CHANNEL_1},
-        .encoder = {&htim4},
-        .gpio = {
-            .in1Port = GPIOF, .in1Pin = GPIO_PIN_7,
-            .in2Port = GPIOF, .in2Pin = GPIO_PIN_8
-        }
-    };
-
-    // 右轮电机配置
-    rightHalCfg = (HAL_MotorConfig){
         .pwm = {.tim = &htim3, .ch = TIM_CHANNEL_2},
         .encoder = {&htim5},
         .gpio = {
             .in1Port = GPIOF, .in1Pin = GPIO_PIN_6,
             .in2Port = GPIOF, .in2Pin = GPIO_PIN_10
+        }
+    };
+
+    // 右轮电机配置
+    rightHalCfg = (HAL_MotorConfig){
+        .pwm = {.tim = &htim3, .ch = TIM_CHANNEL_1},
+        .encoder = {&htim4},
+        .gpio = {
+            .in1Port = GPIOF, .in1Pin = GPIO_PIN_7,
+            .in2Port = GPIOF, .in2Pin = GPIO_PIN_8
         }
     };
 

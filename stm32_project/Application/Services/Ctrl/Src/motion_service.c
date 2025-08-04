@@ -439,7 +439,7 @@ int MotionService_SetSteerAngle(MotionContext* ctx, const float angle_deg)
     return ERR_SUCCESS;
 }
 
-int MotionService_SetSpinParams(MotionContext* ctx, float angular_vel)
+int MotionService_SetSpinParams(MotionContext* ctx, float angular_vel, uint8_t rotation_point)
 {
     // 参数验证
     if (ctx == NULL || !isfinite(angular_vel))
@@ -467,7 +467,8 @@ int MotionService_SetSpinParams(MotionContext* ctx, float angular_vel)
     const float clamped_angular = CLAMP(angular_vel, -max_angular, max_angular);
 
     // 设置参数
-    ctx->motionTarget.params.diffCtrl.angularVelocity = clamped_angular;
+    ctx->motionTarget.params.spinCtrl.angularVelocity = clamped_angular;
+    ctx->motionTarget.params.spinCtrl.rotationPoint   = rotation_point;
 
     osMutexRelease(ctx->targetMutex);
     return ERR_SUCCESS;
@@ -664,24 +665,91 @@ static void handle_spin_in_place(MotionContext* ctx, const MotionTarget* target)
     const ChassisConfig* cfg            = &ctx->chassisConfig;
     const float          track_width_m  = mm_to_m(cfg->trackWidthMM);
     const float          wheel_radius_m = mm_to_m(cfg->wheelRadiusMM);
+    const float          wheelbase_m    = mm_to_m(cfg->wheelbaseMM);
+    const float          angular_vel    = target->params.spinCtrl.angularVelocity;
+    const uint8_t        rotation_point = target->params.spinCtrl.rotationPoint;
 
-    // 计算差速
-    const float angular_vel          = target->params.diffCtrl.angularVelocity;
-    const float linear_vel_per_wheel = angular_vel * track_width_m / 2.0f;
-    // const float rpm                  = (linear_vel_per_wheel * 60.0f) / (2.0f * (float)M_PI * wheel_radius_m);
-    const float rpm = (linear_vel_per_wheel * factor) / wheel_radius_m;
+    float left_rpm    = 0.0f;
+    float right_rpm   = 0.0f;
+    float steer_angle = ctx->chassisConfig.steerCenterAngleDeg; // 默认中位
+    // 运动学计算
+    switch (rotation_point)
+    {
+        case 0: // 标准原地旋转（中心点）- 默认
+        default:
+            {
+                // 基础计算：v = ω × (W/2)
+                const float linear_vel_per_wheel = angular_vel * track_width_m / 2.0f;
+                const float rpm                  = (linear_vel_per_wheel * factor) / wheel_radius_m;
+
+                // 左右轮反向等速
+                left_rpm  = -rpm;
+                right_rpm = rpm;
+
+                // 舵机归中
+                steer_angle = ctx->chassisConfig.steerCenterAngleDeg;
+            }
+            break;
+        case 1: // 前轴为旋转中心
+            {
+                // 计算需要的转向角度
+                const float turn_angle_rad = atan2f(track_width_m / 2, wheelbase_m);
+                const float turn_angle_deg = turn_angle_rad * (180.0f / (float)M_PI);
+
+                // 计算转弯半径（前轴为支点）
+                const float turn_radius  = wheelbase_m;
+                const float outer_radius = sqrtf(powf(turn_radius, 2) + powf(track_width_m / 2, 2));
+
+                // 计算轮子线速度
+                const float linear_vel_per_wheel = angular_vel * outer_radius;
+                const float rpm                  = (linear_vel_per_wheel * factor) / wheel_radius_m;
+
+                // 对于前轴旋转，后轮需要差速
+                left_rpm  = -rpm;
+                right_rpm = rpm;
+
+                // 设置转向角（前轮需要转向）
+                steer_angle = ctx->chassisConfig.steerCenterAngleDeg + turn_angle_deg;
+            }
+            break;
+        case 2: // 后轴为旋转中心
+            {
+                // 计算需要的转向角度
+                const float turn_angle_rad = atan2f(track_width_m / 2, wheelbase_m);
+                const float turn_angle_deg = turn_angle_rad * (180.0f / (float)M_PI);
+
+                // 计算转弯半径（后轴为支点）
+                const float turn_radius  = wheelbase_m;
+                const float outer_radius = sqrtf(powf(turn_radius, 2) + powf(track_width_m / 2, 2));
+
+                // 计算轮子线速度
+                const float linear_vel_per_wheel = angular_vel * outer_radius;
+                const float rpm                  = (linear_vel_per_wheel * factor) / wheel_radius_m;
+
+                // 对于后轴旋转，前轮需要差速
+                left_rpm  = rpm;
+                right_rpm = -rpm;
+
+                // 设置转向角（前轮需要转向）
+                steer_angle =ctx->chassisConfig.steerCenterAngleDeg - turn_angle_deg;
+            }
+            break;
+    }
+    LOG_INFO(LOG_MODULE_MOTION,
+             "SPIN: ω=%.2f, rp=%d, L=%.1f, R=%.1f, steer=%.1f",
+             angular_vel, rotation_point, left_rpm, right_rpm, steer_angle);
 
     // 设置电机转速
-    MotorService_setTargetRPM(ctx->motorService, MOTOR_LEFT_WHEEL, -rpm);
-    MotorService_setTargetRPM(ctx->motorService, MOTOR_RIGHT_WHEEL, rpm);
+    MotorService_setTargetRPM(ctx->motorService, MOTOR_LEFT_WHEEL, left_rpm);
+    MotorService_setTargetRPM(ctx->motorService, MOTOR_RIGHT_WHEEL, right_rpm);
 
     // 舵机归中
-    SteerService_setAngleImmediate(ctx->steerServo, 90);
+    SteerService_setAngleImmediate(ctx->steerServo, steer_angle);
 }
 
 static void handle_mixed_steering(MotionContext* ctx, const MotionTarget* target)
 {
-    const ChassisConfig* cfg            = &ctx->chassisConfig;
+    const ChassisConfig* cfg = &ctx->chassisConfig;
 
     // 处理驱动控制
     switch (target->params.mixedCtrl.driveCtrlType)
