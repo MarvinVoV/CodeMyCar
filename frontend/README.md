@@ -26,6 +26,10 @@ npm install
 npm run dev
 ```
 
+### Compile and open for all network
+```shell
+npm start -- --host 0.0.0.0
+```
 ### Type-Check, Compile and Minify for Production
 
 ```sh
