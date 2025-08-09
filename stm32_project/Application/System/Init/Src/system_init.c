@@ -65,7 +65,7 @@ static bool isInitialized = false;
 static int init_motor_service(void)
 {
     // 左轮电机配置
-    leftHalCfg = (HAL_MotorConfig){
+    rightHalCfg = (HAL_MotorConfig){
         .pwm = {.tim = &htim3, .ch = TIM_CHANNEL_2},
         .encoder = {&htim5},
         .gpio = {
@@ -75,7 +75,7 @@ static int init_motor_service(void)
     };
 
     // 右轮电机配置
-    rightHalCfg = (HAL_MotorConfig){
+    leftHalCfg = (HAL_MotorConfig){
         .pwm = {.tim = &htim3, .ch = TIM_CHANNEL_1},
         .encoder = {&htim4},
         .gpio = {
